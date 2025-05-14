@@ -1,8 +1,8 @@
-/* $VER: vlink elf32.h V0.14 (13.06.11)
+/* $VER: vlink elf32.h V0.17b (26.01.24)
  *
  * This file is part of vlink, a portable linker for multiple
  * object formats.
- * Copyright (c) 1997-2011  Frank Wille
+ * Copyright (c) 1997-2011,2024  Frank Wille
  */
 
 
@@ -29,7 +29,7 @@ struct StabCompUnit {
 /* Prototypes from t_elf32.c */
 
 void elf32_parse(struct GlobalVars *,struct LinkFile *,struct Elf32_Ehdr *,
-                 uint8_t (*)(uint8_t,struct RelocInsert *));
+                 int (*)(uint8_t,struct RelocInsert *));
 void elf32_initdynlink(struct GlobalVars *);
 struct Section *elf32_dyntable(struct GlobalVars *,unsigned long,unsigned long,
                                uint8_t,uint8_t,uint8_t,int);

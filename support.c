@@ -1,8 +1,8 @@
-/* $VER: vlink support.c V0.17a (17.04.22)
+/* $VER: vlink support.c V0.18 (23.12.24)
  *
  * This file is part of vlink, a portable linker for multiple
  * object formats.
- * Copyright (c) 1997-2022  Frank Wille
+ * Copyright (c) 1997-2024  Frank Wille
  */
 
 
@@ -55,7 +55,7 @@ void *alloczero(size_t size)
 }
 
 
-const char *allocstring(const char *s)
+char *allocstring(const char *s)
 /* allocate space for a single string */
 /* @@@ this should be improved by some kind of string buffer */
 {
@@ -229,13 +229,15 @@ char *check_name(char *name)
 }
 
 
-bool checkrange(lword val,bool sign,int size)
-/* Checks if 'val' (signed or unsigned) fits into 'size' bits.
+bool checkrange(lword val,int sign,int size)
+/* Checks if 'val' (signed, unsigned or unknown) fits into 'size' bits.
+   sign==0 is unknown, checks signed and unsigned range,
+   sign==1 is signed, sign==2 is unsigned.
    Returns FALSE when 'val' is out of range! */
 {
-  if (size) {
-    lword min = -(1LL<<(size-1));
-    lword max = sign ? ((1LL<<(size-1))-1LL) : ((1LL<<size)-1LL);
+  if (size>=0 && size<=sizeof(lword)*CHAR_BIT) {
+    lword min = sign!=2 ? -(1LL<<(size-1)) : 0;
+    lword max = sign==1 ? ((1LL<<(size-1))-1LL) : ((1LL<<size)-1LL);
 
     if (val<min || val>max)
       return FALSE;
@@ -243,8 +245,8 @@ bool checkrange(lword val,bool sign,int size)
     return TRUE;
   }
 
-  ierror("checkrange(): size==0 (val=%lld)\n",val);
-  return FALSE;  /* size==0 is illegal */
+  ierror("checkrange(): size==%d (val=%lld)\n",size,(long long)val);
+  return FALSE;  /* size is illegal */
 }
 
 
@@ -539,36 +541,101 @@ void writebf(bool be,void *dst,int fldsiz,int pos,int siz,lword d)
 }
 
 
-lword readreloc(bool be,void *src,int pos,int siz)
-/* Read value from a relocation bitfield. Difference is that there is no
-   known total field length, so pos/8 always defines the offset to the
-   first byte, no matter if LE or BE. Then follow ((pos&7)+siz+7)/8 bytes
-   read in LE or BE format. Note that the bits in a byte are counted from
-   highest to lowest for BE and from lowest to highest for LE! */
+lword readtbyte(struct GlobalVars *gv,void *src)
 {
+  uint8_t *s = src;
+  int len;
+
+  if ((len = gv->octets_per_tbyte) > 1) {
+    lword val = 0;
+
+    while (len--) {
+      val <<= 8;
+      val += (lword)*s++;
+    }
+    return val;
+  }
+  else
+    return *s;
+}
+
+
+void writetbyte(struct GlobalVars *gv,void *dest,lword val)
+{
+  uint8_t *d = dest;
+  int len;
+
+  if ((len = gv->octets_per_tbyte) > 1) {
+    d += len;
+    while (len--) {
+      *(--d) = (uint8_t)val;
+      val >>= 8;
+    }
+  }
+  else
+    *d = (uint8_t)val;
+}
+
+
+void writetbytes(struct GlobalVars *gv,int n,void *dest,lword val)
+{
+  int be = gv->endianness != _LITTLE_ENDIAN_;
+  uint8_t *d = dest;
+
+  if (be)
+    d += n * gv->octets_per_tbyte;  /* we start with LSB, so move behind it */
+
+  while (n--) {
+    if (be) {
+      /* write right to left, for big-endian target */
+      d -= gv->octets_per_tbyte;
+      writetbyte(gv,d,val);
+    }
+    else {
+      /* write left to right, for little-endian target */
+      writetbyte(gv,d,val);
+      d += gv->octets_per_tbyte;
+    }
+    val >>= gv->bits_per_tbyte;
+  }
+}
+
+
+lword readreloc(struct GlobalVars *gv,void *src,int pos,int siz)
+/* Read value from a relocation bitfield. The difference is that there is
+   no known total field length, so pos/B always defines the offset to the
+   first target byte, no matter if LE or BE (with B being the bits per byte).
+   Then follow (pos%B+siz+(B-1))/B bytes read in LE or BE format.
+   Note that the bits in a byte are counted from highest to lowest for BE
+   and from lowest to highest for LE! */
+{
+  int be = gv->endianness != _LITTLE_ENDIAN_;
+  int b = gv->bits_per_tbyte;
   uint8_t *p = src;
   lword d = 0;
   int n;
 
-  /* advance to start-byte (MSB for BE, LSB for LE) */
-  p += pos >> 3;
+  /* advance to start-tbyte (MSB for BE, LSB for LE) */
+  p += (pos / b) * gv->octets_per_tbyte;
 
-  pos &= 7;
-  n = (pos + siz + 7) >> 3;  /* number of bytes to read */
+  pos %= b;
+  n = (pos + siz + b-1) / b;  /* number of tbytes to read */
 
   if (be) {
     while (n--) {
-      d <<= 8;
-      d |= (lword)*p++;
+      d <<= b;
+      d |= readtbyte(gv,p);
+      p += gv->octets_per_tbyte;
     }
     /* normalize BE */
-    d >>= (8 - ((pos + siz) & 7)) & 7;
+    d >>= (b - ((pos + siz) % b)) % b;
   }
   else {
-    p += n;
+    p += n * gv->octets_per_tbyte;
     while (n--) {
-      d <<= 8;
-      d |= (lword)*(--p);
+      d <<= b;
+      p -= gv->octets_per_tbyte;
+      d |= readtbyte(gv,p);
     }
     /* normalize LE */
     d >>= pos;
@@ -579,50 +646,54 @@ lword readreloc(bool be,void *src,int pos,int siz)
 }
 
 
-void writereloc(bool be,void *dst,int pos,int siz,lword d)
-/* Write value to a relocation bitfield. Difference is that there is no
-   known total field length, so pos/8 always defines the offset to the
-   first byte, no matter if LE or BE. Then follow ((pos&7)+siz+7)/8 bytes
-   written in LE or BE format. Note that the bits in a byte are counted from
-   highest to lowest for BE and from lowest to highest for LE! */
+void writereloc(struct GlobalVars *gv,void *dst,int pos,int siz,lword d)
+/* Write value to a relocation bitfield. The difference is that there is
+   no known total field length, so pos/B always defines the offset to the
+   first target byte, no matter if LE or BE (with B being the bits per byte).
+   Then follow (pos%B+siz+(B-1))/B bytes written in LE or BE format.
+   Note that the bits in a byte are counted from highest to lowest for BE
+   and from lowest to highest for LE! */
 {
+  int be = gv->endianness != _LITTLE_ENDIAN_;
+  int b = gv->bits_per_tbyte;
+  lword tmask = makemask(b);
   uint8_t *p = dst;
-  uint8_t m,b;
+  lword m;
   int n,sh;
 
-  /* advance to start-byte (MSB for BE, LSB for LE) */
-  p += pos >> 3;
+  /* advance to start-tbyte (MSB for BE, LSB for LE) */
+  p += (pos / b) * gv->octets_per_tbyte;
 
-  pos &= 7;
-  n = (pos + siz + 7) >> 3;  /* number of bytes to write */
+  pos %= b;
+  n = (pos + siz + (b-1)) / b;  /* number of tbytes to write */
 
   if (be) {
-    p += n;  /* we start with the LSB, so move behind it */
-    sh = (8 - ((pos + siz) & 7)) & 7;
+    p += n * gv->octets_per_tbyte;  /* we start with LSB, so move behind it */
+    sh = (b - ((pos + siz) % b)) % b;
   }
   else
     sh = pos;
 
-  m = 0xff << sh;  /* initial mask for LSB */
-  d <<= sh;        /* shift value to match bitfield */
+  m = (tmask << sh) & tmask;  /* initial mask for LSB */
+  d <<= sh;                   /* shift value to match bitfield */
 
   while (n--) {
     if (be) {
       /* write right to left, for big-endian target */
       if (n == 0)
-        m &= (1 << (8 - pos)) - 1;  /* apply mask for MSB */
-      b = *(--p) & ~m;
-      *p = b | ((uint8_t)d & m);
+        m &= (1LL << (b - pos)) - 1;  /* apply mask for MSB */
+      p -= gv->octets_per_tbyte;
+      writetbyte(gv,p,(readtbyte(gv,p)&~m)|(d&m));
     }
     else {
       /* write left to right, for little-endian target */
       if (n == 0)
-        m &= (2 << ((pos + siz - 1) & 7)) - 1;  /* apply mask for MSB */
-      b = *p & ~m;
-      *p++ = b | ((uint8_t)d & m);
+        m &= (2LL << ((pos + siz - 1) % b)) - 1;  /* apply mask for MSB */
+      writetbyte(gv,p,(readtbyte(gv,p)&~m)|(d&m));
+      p += gv->octets_per_tbyte;
     }
-    d >>= 8;
-    m = 0xff;
+    d >>= b;
+    m = tmask;
   }
 }
 
@@ -694,16 +765,50 @@ void fwrite8(FILE *fp,uint8_t w)
 }
 
 
+void fwrite16(int be,FILE *fp,uint16_t w)
+{
+  if (be)
+    fwrite16be(fp,w);
+  else
+    fwrite16le(fp,w);
+}
+
+
+void fwrite32(int be,FILE *fp,uint32_t w)
+{
+  if (be)
+    fwrite32be(fp,w);
+  else
+    fwrite32le(fp,w);
+}
+
+
 void fwritetbyte(struct GlobalVars *gv,FILE *fp,lword w)
 /* write a target-byte */
 {
-  int bpb = gv->bits_per_tbyte;
+  int o = gv->octets_per_tbyte;
   uint8_t buf[16];
 
-  if (bpb > 16*sizeof(uint8_t))
-    ierror("fwritetbyte(): bpb>128 (%d)",bpb);
-  writereloc(gv->endianness,buf,0,bpb,w);
-  fwritex(fp,buf,(bpb+7)/8);
+#if 0
+  if (o > 16*sizeof(uint8_t))
+    ierror("fwritetbyte(): octets per tbyte > 16 (%d)",o);
+#endif
+  if (gv->output_le) {
+    int i;
+
+    for (i=0; i<o; i++) {
+      buf[i] = (uint8_t)w;
+      w >>= 8;
+    }
+  }
+  else {
+    while (o--) {
+      buf[o] = (uint8_t)w;
+      w >>= 8;
+    }
+    o = gv->octets_per_tbyte;
+  }
+  fwritex(fp,buf,o);
 }
 
 
@@ -732,15 +837,40 @@ void fwrite_align(struct GlobalVars *gv,FILE *fp,uint32_t a,uint32_t n)
 }
 
 
-void fwritegap(struct GlobalVars *gv,FILE *f,long bytes)
+void fwritegap(struct GlobalVars *gv,FILE *f,long bytes,lword fill)
 {
   uint8_t buf[GAPBUFSIZE];
+  size_t len = gv->octets_per_tbyte;  /* @@@ never larger than GAPBUFSIZE! */
 
-  bytes = tbytes(gv,bytes);
-  memset(buf,0,GAPBUFSIZE);
-  do
-    fwritex(f,buf,bytes>GAPBUFSIZE?GAPBUFSIZE:bytes);
-  while ((bytes-=GAPBUFSIZE) > 0);
+  if (fill==0 || len==1) {
+    bytes = tbytes(gv,bytes);
+    memset(buf,(uint8_t)fill,GAPBUFSIZE);
+    do
+      fwritex(f,buf,bytes>GAPBUFSIZE?GAPBUFSIZE:bytes);
+    while ((bytes-=GAPBUFSIZE) > 0);
+  }
+  else {
+    writetbyte(gv,buf,fill);
+    while (bytes-- > 0)
+      fwritex(f,buf,len);
+  }
+}
+
+
+void fwriterawsect(struct GlobalVars *gv,FILE *fp,struct LinkedSection *ls)
+{
+  if (gv->bits_per_tbyte>8 && gv->output_le) {
+    /* write the octets inside a target-byte in little-endian order */
+    size_t sz = ls->filesize;
+    uint8_t *p = ls->data;
+
+    while (sz--) {
+      fwritetbyte(gv,fp,readtbyte(gv,p));
+      p += gv->octets_per_tbyte;
+    }
+  }
+  else  /* target-bytes are available in big-endian order by default */
+    fwritex(fp,ls->data,tbytes(gv,ls->filesize));
 }
 
 
@@ -748,9 +878,9 @@ void fwritefullsect(struct GlobalVars *gv,FILE *fp,struct LinkedSection *ls)
 /* write section contents and uninitialized part as zero */
 {
   if (ls != NULL) {
-    fwritex(fp,ls->data,tbytes(gv,ls->filesize));
+    fwriterawsect(gv,fp,ls);
     if (ls->filesize < ls->size)
-      fwritegap(gv,fp,ls->size - ls->filesize);
+      fwritegap(gv,fp,ls->size - ls->filesize,0);
   }
 }
 
@@ -771,16 +901,16 @@ unsigned long elf_hash(const char *_name)
 }
 
 
-unsigned long align(unsigned long addr,unsigned long alignment)
+unsigned long align(lword addr,unsigned long alignment)
 /* return number of bytes required to achieve alignment */
 {
-  unsigned long a = (1<<alignment) - 1;
+  lword a = (1<<alignment) - 1;
 
   return ((addr+a)&~a) - addr;
 }
 
 
-unsigned long comalign(unsigned long addr,unsigned long a)
+unsigned long comalign(lword addr,lword a)
 /* return number of bytes required to achieve alignment */
 {
   return ((addr+a-1)&~(a-1)) - addr;

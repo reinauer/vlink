@@ -7,7 +7,7 @@ RM = delete force quiet
 
 CC = vc +morphos
 CCOUT = -o $(DUMMYVARIABLE)	# produces the string "-o "
-COPTS = -c -O1
+CFLAGS = -c -O1
 CONFIG = -DAMIGAOS
 
 LD = vc +morphos

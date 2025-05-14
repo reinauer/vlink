@@ -1,8 +1,8 @@
-/* $VER: vlink vlink.h V0.17a (26.06.22)
+/* $VER: vlink vlink.h V0.18 (23.12.24)
  *
  * This file is part of vlink, a portable linker for multiple
  * object formats.
- * Copyright (c) 1997-2022  Frank Wille
+ * Copyright (c) 1997-2024  Frank Wille
  */
 
 #include <stdlib.h>
@@ -11,6 +11,7 @@
 #include <stdarg.h>
 #include <stddef.h>
 #include <ctype.h>
+#include <limits.h>
 #include "config.h"
 
 /* program's name */
@@ -26,6 +27,7 @@ typedef signed long int int32_t;
 typedef unsigned long int uint32_t;
 typedef signed long long int int64_t;
 typedef unsigned long long int uint64_t;
+typedef unsigned int uintptr_t;
 #elif defined(TYPES64BIT)
 typedef signed char int8_t;
 typedef unsigned char uint8_t;
@@ -35,6 +37,7 @@ typedef signed int int32_t;
 typedef unsigned int uint32_t;
 typedef signed long int int64_t;
 typedef unsigned long int uint64_t;
+typedef unsigned long uintptr_t;
 #elif defined(_MSC_VER) && (_MSC_VER < 1600)
 typedef __int8 int8_t;	            /* prior to VS2010 stdint.h is missing */
 typedef unsigned __int8 uint8_t;
@@ -169,6 +172,7 @@ struct ObjectUnit {
 };
 
 #define OUF_LINKED 0x0001       /* object unit is marked as linked */
+#define OUF_EHFPPC 0x0100       /* target ehf: PPC object unit */
 #define OUF_SCRIPT 0x8000       /* linker script dummy object */
 #define OBJSYMHTABSIZE 0x20     /* number of entries in symbol hash table */
 
@@ -177,23 +181,30 @@ struct RelRef {
   struct Section *refsec;       /* relative referenced sections */
 };
 
-struct TargetExt {
-  struct TargetExt *next;
-  uint8_t id;                   /* target identification */
-  uint8_t sub_id;               /* sub-id for target */
-  uint16_t flags;
-  /* target specific data follows */
+typedef unsigned srclinetype;
+typedef unsigned long srcoffstype;
+
+struct SourceLines {
+  struct SourceLines *next;
+  const char *path;             /* full path to source text */
+  const char *name;             /* source text file name */
+  char path_sep;                /* path separator character for name */
+  unsigned char flags;
+  unsigned short nameidx;       /* source text name table index */
+  unsigned lang;                /* source language */
+  unsigned entries;             /* number of line/offset entries */
+  srclinetype *lines;	        /* array of line-numbers */
+  srcoffstype *offsets;         /* array of section-offsets */
 };
-/* ids */
-#define TGEXT_UNDEF 0
-#define TGEXT_AMIGAOS 1
-#define TGEXT_ELF 2
-#define TGEXT_AOUT 3
+/* flags */
+#define SLF_NOCASE      (1<<0)  /* file names are not case-sensitive */
+/* lang */
+#define DW_LANG_DEFAULT 0x0001  /* FIXME: C89 as default? */
 
 struct Section {
   struct node n;
   struct ObjectUnit *obj;       /* link to ObjectUnit */
-  struct LinkedSection *lnksec; /* ptr to joined sections */
+  struct LinkedSection *lnksec; /* ptr to merged output sections */
   const char *name;             /* section's name, e.g. .text, .data, ... */
   unsigned long hash;           /* section name's hash code */
   uint32_t id;                  /* unique section id - target dependent */
@@ -202,7 +213,7 @@ struct Section {
   uint8_t protection;           /* readable, writable, executable, ... */
   uint8_t alignment;            /* number of bits, which have to be zero */
   uint32_t memattr;             /* target-specific memory attributes */
-  unsigned long va;             /* the section's virtual address */
+  lword va;                     /* the section's virtual address */
   unsigned long offset;         /* offset relative to 1st sec. of same type */
   uint8_t *data;                /* the section's contents */
   unsigned long size;           /* the section's size in bytes (+alignment) */
@@ -210,9 +221,10 @@ struct Section {
   struct list relocs;           /* relocations for this section */
   struct list xrefs;            /* external references to unknown symbols */
   struct RelRef *relrefs;       /* all sections which are referenced rel. */
-  struct TargetExt *special;    /* link to target specific data */
+  struct SourceLines *srclines; /* optional source line debugging info */
   int link;                     /* link to other section (e.g. ELF-strtab) */
   uint16_t filldata;            /* used to fill gaps */
+  unsigned internal_flags;      /* internal linker flags - see below */
 };
 
 /* section types */
@@ -229,15 +241,21 @@ struct Section {
 #define SF_SMALLDATA       0x04 /* section is referenced base-relative */
 #define SF_LINKONCE        0x08 /* link only a single section with this name */
 #define SF_REFERENCED      0x10 /* section was referenced */
-#define SF_PORTABLE_MASK   0x1f /* mask for target-independent flags */
-/* target specific section flags: amiga */
-#define SF_EHFPPC          0x20  /* target ehf: section contains PPC code */
+#define SF_PORTABLE_MASK   0x3f /* mask for target-independent flags */
+/* target specific section flags: */
+#define SF_EHFPPC          0x40 /* target ehf: section contains PPC code */
+#define SF_DPAGE           0x40 /* 6502/65816: zero/direct-page section */
+#define SF_HUGEDATA        0x80 /* 65816: huge data section */
 
 /* protection */
 #define SP_READ 1
 #define SP_WRITE 2
 #define SP_EXEC 4
 #define SP_SHARE 8
+
+/* internal flags */
+#define ILF_BADADDRINVA    (1<<0)  /* address out of range, saved in va */
+#define ILF_BANKALIGN      (1<<1)  /* must be aligned to next bank in output */
 
 
 struct SymbolMask {
@@ -261,16 +279,17 @@ struct Reloc {                  /* relocation information */
   union {
     uint32_t id;                /* section index */
     struct Section *ptr;        /* base addr of this sect. has to be added */
-    struct LinkedSection *lnk;  /* base addr of joined sections */
+    struct LinkedSection *lnk;  /* base addr of merged output sections */
     struct Symbol *symbol;      /* symbol-pointer, if x-ref. was resolved */
     uint32_t smask;             /* symbol name's feat.mask (!OUF_LINKED) */
     struct SymbolMask *cmask;	/* ORed feat.mask of all xrefs with this name */
+    int xrefinfo;               /* xref info/index field for output funcs */
   } relocsect;
   unsigned long offset;         /* section-offset of relocation */
   lword addend;                 /* add this to relocation value */
   struct RelocInsert *insert;   /* reloc insert field description */
-  uint8_t rtype;                /* general reloc type - see below */
-  uint8_t flags;                /* relocation specific flags */
+  int rtype;                    /* general reloc type - see below */
+  unsigned flags;               /* relocation specific flags */
 };
 
 /* general relocation types */
@@ -291,17 +310,16 @@ struct Reloc {                  /* relocation information */
 #define R_COPY 14               /* copy from shared object */
 #define R_JMPSLOT 15            /* procedure linkage table entry */
 #define R_SECOFF 16             /* symbol's offset to start of section */
-#define LAST_STANDARD_RELOC R_SECOFF
-
-/* CPU specific relocation types */
-#define R_SD2 32                /* PPC: small data 2, base-relative reloc */
-#define R_SD21 33               /* PPC-EABI: SD for base-reg 0, 2 or 13 */
-#define R_MOSDREL 34            /* PPC-MOS: baserel(r13) rel. to __r13_init */
-#define R_AOSBREL 35            /* PPC-OS4: baserel(r2) rel. to data segm. */
+#define R_MEMID 17              /* ID-code of section's destination memory */
+#define LAST_STANDARD_RELOC R_MEMID
 
 /* internal relocation types */
 #define R_ABSCOPY 128           /* absolute sh.obj. ref., needs R_COPY */
 #define R_PCCOPY 129            /* pc-relative sh.obj. ref., needs R_COPY */
+
+/* temporary signed/unsigned flags on type for newreloc() */
+#define R_S 0x400               /* newreloc() signed relocation type */
+#define R_U 0x800               /* newreloc() unsigned relocation type */
 
 /* Reloc flags */
 #define RELF_WEAK 1             /* reference is weak and defaults to 0 */
@@ -311,6 +329,8 @@ struct Reloc {                  /* relocation information */
 #define RELF_PLT 0x40           /* dynamic PLT relocation */
 #define RELF_DYN 0x80           /* other dynamic relocation */
 #define RELF_DYNLINK 0xc0       /* takes part in dynamic linking */
+#define RELF_S 0x100            /* relocation is signed */
+#define RELF_U 0x200            /* relocation is unsigned */
 
 
 struct Symbol {
@@ -329,7 +349,7 @@ struct Symbol {
   uint8_t bind;                 /* local, global or weak binding */
   uint32_t size;                /* symbol's size in bytes */
   uint32_t fmask;               /* gv->masked_symbols: feature bit-mask or 0 */
-  uint32_t extra;               /* extra data, used by some targets */
+  int extra;                    /* extra data, used by some targets */
 };
 
 /* symbol type */
@@ -393,11 +413,13 @@ struct MemoryDescr {
   lword org;
   lword len;
   lword current;
+  lword id;
 };
 
 /* default memory region parameters */
 #define MEM_DEFORG (0LL)
 #define MEM_DEFLEN (0x7fffffffffffffffLL)
+#define MEM_NOID (~0LL)
 
 
 /* overwrite attributes of an input section */
@@ -425,11 +447,13 @@ struct LinkedSection {          /* linked sections of same type and name */
   uint16_t reserved;
   struct MemoryDescr *destmem;  /* destination memory block (ld-scripts) */
   struct MemoryDescr *relocmem; /* relocation memory block (ld-scripts) */
-  unsigned long copybase;       /* section's virtual copy address (destmem) */
-  unsigned long base;           /* the section's virtual address (relocmem) */
+  lword copybase;               /* section's virtual copy address (destmem) */
+  lword base;                   /* the section's virtual address (relocmem) */
   unsigned long size;           /* the section's size in bytes */
   unsigned long filesize;       /* size in file, rest is filled with '0' */
   unsigned long gapsize;        /* bytes to fill until next section */
+  unsigned long banksize;       /* nonzero: sections must not cross banks */
+  unsigned long bankoffs;       /* to skip on next bank alignment */
   struct list sections;         /* s. which have been linked together */
   uint8_t *data;                /* the section's contents */
   struct list relocs;           /* relocations for this section */
@@ -441,6 +465,7 @@ struct LinkedSection {          /* linked sections of same type and name */
 #define LSF_USED           0x01 /* section used in linker script */
 #define LSF_NOLOAD         0x02 /* used on empty LinkedSection (ldscript) */
 #define LSF_PRESERVE       0x04 /* don't delete when unused/empty */
+#define LSF_NOXREFS        0x08 /* no xrefs allowed to this sect. (overlays) */
 
 
 struct Phdr {
@@ -503,24 +528,29 @@ struct GlobalVars {
   bool no_page_align;           /* page-alignment disabled */
   bool fix_unnamed;             /* unnamed section get a default name */
   bool textbaserel;             /* allow base-relative access on code secs. */
-  bool textbasedsyms;           /* symbol offsets based on text section */
   bool output_sections;         /* output each section as a new file */
-  uint8_t min_alignment;        /* minimal section alignment (default 0) */
-  uint8_t ptr_alignment;        /* minimum alignment for pointers */
+  bool output_le;               /* output a tbyte in little-endian order */
   bool auto_merge;              /* merge sections with pc-rel. references */
   bool merge_same_type;         /* merge all sections of same type */
+  bool merge_same_attr;         /* merge all sections with same attributes */
   bool merge_all;               /* merge everything into a single section */
   uint8_t gc_sects;             /* garbage-collect unreferenced sections */
   bool keep_trailing_zeros;     /* keep trailing zero-bytes at end of sect. */
   bool keep_sect_order;         /* keep order of section as found in objs */
-  uint8_t bits_per_tbyte;       /* bits per target byte (word) */
-  uint8_t bits_per_taddr;       /* bits in target address (taddr, lword) */
-  uint8_t tbytes_per_taddr;     /* target bytes in a target address word */
   char masked_symbols;          /* symbols may use a feature-mask */
   bool fail_on_warning;         /* return with error code from warnings */
+  uint8_t bits_per_tbyte;       /* bits per target byte (word) */
+  char reserved[3];
+  size_t octets_per_tbyte;      /* host-bytes (8-bit) per target byte */
+  uint8_t bits_per_taddr;       /* bits in target address (taddr, lword) */
+  uint8_t tbytes_per_taddr;     /* target bytes in a target address word */
+  uint8_t min_alignment;        /* minimal section alignment (default 0) */
+  uint8_t ptr_alignment;        /* minimum alignment for pointers */
   FILE *map_file;               /* map file */
   FILE *trace_file;             /* linker trace output */
-  FILE *vice_file;              /* label-file for the VICE emulator */
+  FILE *sym_file;               /* sym/val file following a given format */
+  char *sym_file_format;        /* format string for symbol files */
+  unsigned sym_file_flags;      /* flags to control symbol file output */
   struct SymNames **trace_syms; /* trace-symbol hash table */
   struct SymNames *prot_syms;   /* list of protected symbols */
   struct SymNames *undef_syms;  /* list of undefined symbols */
@@ -534,6 +564,7 @@ struct GlobalVars {
   const char *soname;           /* real name of shared object (-soname) */
   const char *interp_path;      /* path to program interpreter (ELF) */
   struct list rpaths;           /* library paths for dynamic linker (ELF) */
+  const char *lineoffsfile;     /* optional source line/offsets output */
 
   /* errors */
   bool dontwarn;                /* suppress warnings */
@@ -576,7 +607,6 @@ struct GlobalVars {
   bool dynamic;                 /* dynamic linking - requires interpreter */
   bool use_ldscript;            /* true means there are LinkedSections, */
                                 /*  generated by a linker-script */
-  uint8_t scriptflags;          /* flags set by the script parser */
 };
 
 #define SYMHTABSIZE 0x10000     /* number of entries in symbol hash table */
@@ -598,10 +628,10 @@ struct GlobalVars {
 #define RTAB_ADDEND     0x02    /* table includes addends */
 #define RTAB_SHORTOFF   0x04    /* table uses short offsets (e.g. 16 bit) */
 
-/* script flags */
-#define LDSF_KEEP     0x01      /* don't delete empty sections */
-#define LDSF_SORTFIL  0x02      /* sort files machting on pattern */
-#define LDSF_SORTSEC  0x04      /* sort sections machting on pattern */
+/* symbol file flags */
+#define SFF_VALFIRST  1         /* value left, name right */
+#define SFF_VALSECOND 2         /* name left, value right */
+#define SFF_NOLOCAL   4         /* skip local symbols */
 
 /* collect_ctors_type */
 #define CCDT_NONE     0         /* don't look for constructors/destructors */
@@ -612,6 +642,32 @@ struct GlobalVars {
                                                _EXIT[_<pri=0-9>]_<name>() */
 #define CCDT_SASC     4         /* SAS/C-style: __STI[_<pri>]_<name>()
                                                 __STD[_<pri>]_<name>() */
+
+/* pattern structure to match file and section names from linker scripts */
+struct Patterns {
+  char *fmatch;                 /* file name match pattern */
+  char **fexclude;              /* file name exclusion patterns */
+  unsigned fsort;               /* file name sorting mode */
+  char **smatch;                /* section name match patterns */
+  char **sexclude;              /* section name exclusion patterns */
+  unsigned ssortlev;            /* current level of section sorting */
+  unsigned ssort[2];            /* levels of section sorting mode */
+  unsigned flags;
+};
+
+#define PSORT_MAXLEV    2       /* maximum of two sorting levels */
+
+/* sort modes */
+#define PSORT_NONE      0       /* disable sorting */
+#define PSORT_NAME      1       /* sort sections by name */
+#define PSORT_ALIGN     2       /* sort sections by alignment */
+#define PSORT_SIZE      3       /* sort sections by size */
+#define PSORT_MODE      0x3f    /* mask sort mode */
+#define PSORT_REV       0x40    /* reverse sorting flag */
+
+/* flags */
+#define PFL_KEEP        1       /* keep these sections in output */
+
 
 typedef union {                 /* argument type for dynentry() */
   const char *name;
@@ -627,6 +683,8 @@ struct FFFuncs {                /* file format specific functions and data */
     (*init)(struct GlobalVars *,int);
   int                           /* file format specific options */
     (*options)(struct GlobalVars *,int,const char **,int *);
+  void                          /* print help for specific options */
+    (*printhelp)(void);
   unsigned long                 /* size of header before first section */
     (*headersize)(struct GlobalVars *);
   int                           /* format identification */
@@ -663,7 +721,7 @@ struct FFFuncs {                /* file format specific functions and data */
   uint32_t id;                  /* general purpose id (e.g. MID for a.out) */
   uint8_t rtab_format;          /* reloc-table format (GV.reloctab_format) */
   uint8_t rtab_mask;            /* mask of allowed reloc-table formats */
-  int8_t endianness;             /* 1=bigEndian, 0=littleEndian */
+  int8_t endianness;            /* 1=bigEndian, 0=littleEndian */
   int8_t addr_bits;             /* bits in a target address (16, 32, 64) */
   uint8_t ptr_alignment;        /* minimum alignment for pointers */
   uint32_t flags;               /* general and target-family specific flags */
@@ -673,6 +731,7 @@ struct FFFuncs {                /* file format specific functions and data */
 #define FFINI_STARTUP 0         /* all targets on early startp */
 #define FFINI_DESTFMT 1         /* init dest.target in linker_init() only */
 #define FFINI_RESOLVE 2         /* dest.target at the end of linker_resolve() */
+#define FFINI_MERGE 3           /* dest.target before merging sections */
 /* Return codes from identify() */
 #define ID_IGNORE (-1)          /* ignore file - e.g. an empty archive */
 #define ID_UNKNOWN 0            /* unknown file format */
@@ -715,6 +774,7 @@ struct FFFuncs {                /* file format specific functions and data */
                                 /* each section. */
 #define FFF_NOFILE 0x20         /* Target creates output files itself */
 #define FFF_KEEPRELOCS 0x40     /* Binary target allows reloc table appended */
+#define FFF_OUTWORDADDR 0x80    /* Output supports bits_per_tbyte != 8 */
 
 
 /* List of artificially generated pointers or long words, which are */
@@ -745,7 +805,7 @@ void cleanup(struct GlobalVars *);
 extern const char *version_str;
 #endif
 void show_version(void);
-void show_usage(void);
+void show_usage(struct GlobalVars *,int);
 
 /* support.c */
 #ifndef SUPPORT_C
@@ -754,7 +814,7 @@ extern const char *endian_name[];
 void *alloc(size_t);
 void *re_alloc(void *,size_t);
 void *alloczero(size_t);
-const char *allocstring(const char *);
+char *allocstring(const char *);
 void *alloc_hashtable(size_t);
 void initlist(struct list *);
 void insertbefore(struct node *,struct node *);
@@ -767,7 +827,7 @@ int stricmp(const char *,const char *);
 char *mapfile(const char *);
 const char *base_name(const char *);
 char *check_name(char *);
-bool checkrange(lword,bool,int);
+bool checkrange(lword,int,int);
 int8_t host_endianness(void);
 uint16_t swap16(uint16_t);
 uint32_t swap32(uint32_t);
@@ -792,22 +852,29 @@ void write32(bool,void *,uint32_t);
 void write64(bool,void *,uint64_t);
 lword readbf(bool,void *,int,int,int);
 void writebf(bool,void *,int,int,int,lword);
-lword readreloc(bool,void *,int,int);
-void writereloc(bool,void *,int,int,lword);
+lword readtbyte(struct GlobalVars *,void *);
+void writetbyte(struct GlobalVars *,void *,lword);
+void writetbytes(struct GlobalVars *,int,void *,lword);
+lword readreloc(struct GlobalVars *,void *,int,int);
+void writereloc(struct GlobalVars *,void *,int,int,lword);
 void fwritex(FILE *,const void *,size_t);
 void fwrite32be(FILE *,uint32_t);
 void fwrite16be(FILE *,uint16_t);
 void fwrite32le(FILE *,uint32_t);
 void fwrite16le(FILE *,uint16_t);
+void fwrite16(int,FILE *,uint16_t);
+void fwrite32(int,FILE *,uint32_t);
+void fwrite8(FILE *,uint8_t);
 void fwrite8(FILE *,uint8_t);
 void fwritetbyte(struct GlobalVars *,FILE *,lword);
 void fwritetaddr(struct GlobalVars *,FILE *,lword);
 void fwrite_align(struct GlobalVars *,FILE *,uint32_t,uint32_t);
-void fwritegap(struct GlobalVars *,FILE *,long);
+void fwritegap(struct GlobalVars *,FILE *,long,lword);
+void fwriterawsect(struct GlobalVars *,FILE *,struct LinkedSection *);
 void fwritefullsect(struct GlobalVars *,FILE *,struct LinkedSection *);
 unsigned long elf_hash(const char *);
-unsigned long align(unsigned long,unsigned long);
-unsigned long comalign(unsigned long,unsigned long);
+unsigned long align(lword,unsigned long);
+unsigned long comalign(lword,lword);
 int shiftcnt(uint32_t);
 int lshiftcnt(lword);
 int highest_bit_set(lword);
@@ -834,7 +901,7 @@ void linker_relrefs(struct GlobalVars *);
 void linker_dynprep(struct GlobalVars *);
 void linker_sectrefs(struct GlobalVars *);
 void linker_gcsects(struct GlobalVars *);
-void linker_join(struct GlobalVars *);
+void linker_merge(struct GlobalVars *);
 void linker_delunused(struct GlobalVars *);
 void linker_mapfile(struct GlobalVars *);
 void linker_copy(struct GlobalVars *);
@@ -873,13 +940,15 @@ extern const char dynamic_name[];
 extern const char r13init_name[];
 extern const char noname[];
 #endif
-size_t tbytes(struct GlobalVars *,size_t);
-void section_fill(struct GlobalVars *,uint8_t *,size_t,uint16_t,size_t);
+#define tbytes(gv,n) ((size_t)(n) * gv->octets_per_tbyte)
+void section_fill(struct GlobalVars *,uint8_t *,size_t,uint16_t,lword);
 void section_copy(struct GlobalVars *,uint8_t *,size_t,uint8_t *,size_t);
 bool check_protection(struct GlobalVars *,const char *);
 struct Symbol *findsymbol(struct GlobalVars *,struct Section *,
                           const char *,uint32_t);
 void hide_shlib_symbols(struct GlobalVars *);
+struct Symbol *newsymbol(const char *,lword,uint8_t,uint8_t,uint8_t,uint8_t,
+                         uint32_t);
 struct Symbol *addsymbol(struct GlobalVars *,struct Section *,
                          const char *,const char *,lword,
                          uint8_t,uint8_t,uint8_t,uint8_t,uint32_t,bool);
@@ -901,7 +970,7 @@ struct RelocInsert *initRelocInsert(struct RelocInsert *,
                                     uint16_t,uint16_t,lword);
 struct Reloc *newreloc(struct GlobalVars *,struct Section *,
                        const char *,struct Section *,uint32_t,
-                       unsigned long,uint8_t,lword);
+                       unsigned long,int,lword);
 void addreloc(struct Section *,struct Reloc *,uint16_t,uint16_t,lword);
 void addreloc_ri(struct Section *,struct Reloc *,struct RelocInsert *);
 bool isstdreloc(struct Reloc *,uint8_t,uint16_t);
@@ -909,9 +978,8 @@ struct Reloc *findreloc(struct Section *,unsigned long);
 void addstabs(struct ObjectUnit *,struct Section *,char *,
               uint8_t,int8_t,int16_t,uint32_t);
 void fixstabs(struct ObjectUnit *);
-struct TargetExt *addtargetext(struct Section *,uint8_t,uint8_t,uint16_t,
-                               uint32_t);
-bool checktargetext(struct LinkedSection *,uint8_t,uint8_t);
+struct SourceLines *newsourcelines(struct Section *,const char *);
+void allocsrclinetab(struct SourceLines *,size_t);
 lword readsection(struct GlobalVars *,uint8_t,uint8_t *,size_t,
                   struct RelocInsert *);
 lword writesection(struct GlobalVars *,uint8_t *,size_t,struct Reloc *,lword);
@@ -957,7 +1025,7 @@ struct SecAttrOvr *getsecattrovr(struct GlobalVars *,const char *,uint32_t);
 void addsecrename(const char *,const char *);
 struct SecRename *getsecrename(void);
 void trim_sections(struct GlobalVars *);
-void untrim_sections(struct GlobalVars *);
+void untrim_sections(struct GlobalVars *,int);
 struct LinkedSection *load_next_section(struct GlobalVars *);
 
 /* dir.c */
@@ -969,11 +1037,10 @@ void set_exec(const char *);
 
 /* ldscript.c */
 bool is_ld_script(struct ObjectUnit *);
-void update_address(struct MemoryDescr *,struct MemoryDescr *,unsigned long);
-void align_address(struct MemoryDescr *,struct MemoryDescr *,unsigned long);
-void free_patterns(char *,char **);
-int test_pattern(struct GlobalVars *,char **,char ***);
-struct Section *next_pattern(struct GlobalVars *,char **,char ***);
+lword update_address(struct MemoryDescr *,struct MemoryDescr *,unsigned long);
+lword align_address(struct MemoryDescr *,struct MemoryDescr *,unsigned long);
+struct Section *next_pattern(struct GlobalVars *,struct Patterns *);
+void free_patterns(struct Patterns *);
 struct LinkedSection *next_secdef(struct GlobalVars *);
 void init_secdef_parse(struct GlobalVars *);
 void init_ld_script(struct GlobalVars *);
@@ -987,7 +1054,8 @@ bool patternlist_match(char **,const char *);
 /* expr.c */
 void skip(void);
 char getchr(void);
-int testchr(char);
+bool testchr(char);
+bool expectchr(char);
 void skipblock(int,char,char);
 void back(int);
 char *gettxtptr(void);
@@ -1001,8 +1069,12 @@ void init_parser(struct GlobalVars *,const char *,const char *,int);
 #if defined(AOUT_MINT) || defined(ATARI_TOS)
 #ifndef T_TOSOPTS_C
 extern uint32_t tos_flags;
+extern bool textbasedsyms;  /* symbol offsets based on text section */
+extern bool sozobonx;
+extern bool hisoftdri;
 #endif
 int tos_options(struct GlobalVars *,int,const char **,int *);
+void tos_printhelp(void);
 #endif
 
 /* t_amigaos.c */
@@ -1039,6 +1111,13 @@ extern struct FFFuncs fff_os9_6809;
 #ifdef O65
 extern struct FFFuncs fff_o6502;
 extern struct FFFuncs fff_o65816;
+#endif
+#endif
+
+/* t_appleomf.c */
+#ifndef T_APPLEOMF_C
+#ifdef APPLE_OMF
+extern struct FFFuncs fff_appleomf;
 #endif
 #endif
 
@@ -1137,11 +1216,8 @@ extern struct FFFuncs fff_aoutpc386;
 
 /* t_rawbin.c */
 #ifndef T_RAWBIN_C
-#if defined(RAWBIN1)
-extern struct FFFuncs fff_rawbin1;
-#endif
-#if defined(RAWBIN2)
-extern struct FFFuncs fff_rawbin2;
+#if defined(RAWBIN)
+extern struct FFFuncs fff_rawbin;
 #endif
 #if defined(AMSDOS)
 extern struct FFFuncs fff_amsdos;
@@ -1165,6 +1241,12 @@ extern struct FFFuncs fff_cocoml;
 #endif
 #if defined(DRAGONBIN)
 extern struct FFFuncs fff_dragonbin;
+#endif
+#if defined(FOENIX)
+extern struct FFFuncs fff_pgxc02;
+extern struct FFFuncs fff_pgx816;
+extern struct FFFuncs fff_pgz24;
+extern struct FFFuncs fff_pgz32;
 #endif
 #if defined(ORICMC)
 extern struct FFFuncs fff_oricmc;

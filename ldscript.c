@@ -1,8 +1,8 @@
-/* $VER: vlink ldscript.c V0.17a (19.06.22)
+/* $VER: vlink ldscript.c V0.18 (31.12.24)
  *
  * This file is part of vlink, a portable linker for multiple
  * object formats.
- * Copyright (c) 1997-2022  Frank Wille
+ * Copyright (c) 1997-2024  Frank Wille
  */
 
 
@@ -26,16 +26,12 @@ static struct LinkedSection *current_ls; /* current section in work */
 static const char *new_ls_name;          /* newly defined sect. name (pass 1) */
 
 /* BYTE, SHORT, LONG, etc. data commands */
-static int datasize,dataalign;  /* datasize != 0 enables data command */
+static int datasize;  /* datasize != 0 enables data command */
 static lword dataval;
 
 /* for 2nd pass over the SECTIONS block during linking: */
 static char *secblkbase;
 static int secblkline;
-
-/* for 2nd pass over a section definition block: */
-static char *secdefbase;
-static int secdefline;
 
 /* Default segment names (including a blank to prevent redefinitions) */
 static const char *defhdr = " headers";
@@ -395,32 +391,29 @@ static struct MemoryDescr *find_memblock(char *name)
 }
 
 
-void update_address(struct MemoryDescr *rmd,struct MemoryDescr *dmd,
-                    unsigned long addbytes)
+lword update_address(struct MemoryDescr *rmd,struct MemoryDescr *dmd,
+                     unsigned long addbytes)
 {
   const char *secname = current_ls ? current_ls->name : defmemname;
 
+  if (rmd->current+(lword)addbytes > rmd->org+rmd->len)
+    return rmd->current+(lword)addbytes;  /* failed reloc address */
+  if (dmd!=rmd && dmd->current+(lword)addbytes > dmd->org+dmd->len)
+    return dmd->current+(lword)addbytes;  /* failed destination address */
+
   rmd->current += (lword)addbytes;
-  if (rmd->current > rmd->org + rmd->len) {
-    /* Fatal: Size of memory region exceeded! */
-    error(63,rmd->name,secname,(unsigned long long)rmd->current);
-  }
-  if (dmd != rmd) {
-    dmd->current += addbytes;
-    if (dmd->current > dmd->org + dmd->len) {
-      /* Fatal: Size of memory region exceeded! */
-      error(63,dmd->name,secname,(unsigned long long)dmd->current);
-    }
-  }
+  if (dmd != rmd)
+    dmd->current += (lword)addbytes;
+  return 0;  /* ok */
 }
 
 
-void align_address(struct MemoryDescr *rmd,struct MemoryDescr *dmd,
-                   unsigned long alignment)
+lword align_address(struct MemoryDescr *rmd,struct MemoryDescr *dmd,
+                    unsigned long alignment)
 {
   unsigned long addbytes = align(rmd->current,alignment);
 
-  update_address(rmd,dmd,addbytes);
+  return update_address(rmd,dmd,addbytes);
 }
 
 
@@ -913,50 +906,40 @@ static bool get_dataval(void)
 static void sc_byte(struct GlobalVars *gv)
 /* BYTE(data8) */
 {
-  if (get_dataval()) {
+  if (get_dataval())
     datasize = 1;
-    dataalign = 0;
-  }
 }
 
 
 static void sc_short(struct GlobalVars *gv)
 /* SHORT(data16) */
 {
-  if (get_dataval()) {
+  if (get_dataval())
     datasize = 2;
-    dataalign = 0;  /* @@@ */
-  }
 }
 
 
 static void sc_long(struct GlobalVars *gv)
 /* LONG(data32) */
 {
-  if (get_dataval()) {
+  if (get_dataval())
     datasize = 4;
-    dataalign = 0;  /* @@@ */
-  }
 }
 
 
 static void sc_quad(struct GlobalVars *gv)
 /* QUAD(data64) */
 {
-  if (get_dataval()) {
+  if (get_dataval())
     datasize = 8;
-    dataalign = 0;  /* @@@ */
-  }
 }
 
 
 static void sc_reserve(struct GlobalVars *gv)
 /* RESERVE(space) */
 {
-  if (get_dataval()) {
+  if (get_dataval())
     datasize = -1;
-    dataalign = 0;
-  }
 }
 
 
@@ -1037,7 +1020,8 @@ static void sc_searchdir(struct GlobalVars *gv)
 }
 
 
-static struct MemoryDescr *add_memblock(const char *name,lword org,lword len)
+static struct MemoryDescr *add_memblock(const char *name,
+                                        lword org,lword len,lword id)
 {
   struct MemoryDescr *last,*new = alloc(sizeof(struct MemoryDescr));
 
@@ -1055,16 +1039,18 @@ static struct MemoryDescr *add_memblock(const char *name,lword org,lword len)
   if (org+len < org)
     len -= org+len+1;
   new->len = len;
+  new->id = id;
   return new;
 }
 
 
-static int startofsecdef(lword *s_addr,char *s_type,lword *s_lma)
+static int startofsecdef(lword *s_addr,unsigned *s_flags,lword *s_lma,
+                         lword *s_banksz,lword *s_bankof)
 /* Parse syntax of section definition until '{' and return VMA address,
    LMA address and type, when given.
    Returns bitfield. 0 when syntax is incorrect, 1 for correct,
    3 for s_addr set, 5 for s_lma set and 7 for both.
-   Syntax: [addr-expr] [(type)] : [AT(lma)] { */
+   Syntax: [addr-expr] [(BANKSIZE=n[,o])] [(NOLOAD)] : [AT(lma)] { */
 {
   int ret = 1;
   lword caddr = -2; /* this prevents expression evaluation during pre-parse */
@@ -1073,7 +1059,8 @@ static int startofsecdef(lword *s_addr,char *s_type,lword *s_lma)
   if (current_ls)
     caddr = current_ls->relocmem->current;
 
-  *s_type = 0;
+  *s_flags = 0;
+  *s_banksz = *s_bankof = 0;
 
   c = getchr();
   if (c != ':') {
@@ -1092,9 +1079,35 @@ static int startofsecdef(lword *s_addr,char *s_type,lword *s_lma)
       ret |= 2;
       c = getchr();
     }
-    if (c == '(') {
-      if (buf = getword()) {
-        strcpy(s_type,buf);
+
+    while (c == '(') {  /* (BANKSIZE=n[,o]), (NOLOAD), etc. */
+      if (buf = getalnum()) {
+        if (!strcmp(buf,"BANKSIZE")) {
+          if (getchr() == '=') {
+            if (!preparse)
+              parse_expr(-1,s_banksz);
+            else
+              parse_expr(-2,s_banksz);
+            if (getchr() == ',') {  /* optional offset into bank */
+              if (!preparse)
+                parse_expr(-1,s_bankof);
+              else
+                parse_expr(-2,s_bankof);
+            }
+            else
+              back(1);
+          }
+          else {
+            error(66,scriptname,getlineno(),'=');  /* '=' expected */
+            back(1);
+            ret = 0;
+          }
+        }
+        else if (!strcmp(buf,"NOLOAD"))
+          *s_flags = 1;  /* NOLOAD-flag */
+        else
+          error(65,scriptname,getlineno(),buf);  /* unknown keyword ignored */
+
         if (getchr() != ')') {
           error(66,scriptname,getlineno(),')');  /* ')' expected */
           back(1);
@@ -1102,6 +1115,8 @@ static int startofsecdef(lword *s_addr,char *s_type,lword *s_lma)
         }
         c = getchr();
       }
+      else
+        break;
     }
   }
 
@@ -1331,7 +1346,7 @@ static void define_memory(struct GlobalVars *gv)
 {
   char memname[MAXLEN];
   char *str,c;
-  lword org,len;
+  lword org,len,id;
 
   if (startofblock('{')) {
     while (str = getword()) {
@@ -1345,7 +1360,14 @@ static void define_memory(struct GlobalVars *gv)
         org = readmemparam(gv,"ORIGIN");
         if (getchr() == ',') {
           len = readmemparam(gv,"LENGTH");
-          add_memblock(memname,org,len);
+          if (getchr() == ',') {
+            id = readmemparam(gv,"ID");
+          }
+          else {
+            back(1);
+            id = MEM_NOID;
+          }
+          add_memblock(memname,org,len,id);
         }
         else
           error(66,scriptname,getlineno(),',');  /* ',' expected */
@@ -1446,7 +1468,7 @@ static void define_phdrs(struct GlobalVars *gv)
 
 static void predefine_sections(struct GlobalVars *gv)
 /* Syntax: */
-/* <secname> [addr] [(type)] : [AT(lma)] { ... } */
+/* <secname> [addr] [BANKSIZE(size[,offs])] [(type)] : [AT(lma)] { ... } */
 /*           [>region] [AT>lma-region] [:PHDR ...] [=FillExp] */
 {
   char *keyword;
@@ -1473,17 +1495,18 @@ static void predefine_sections(struct GlobalVars *gv)
         struct Section *dummy_sec;
         struct Phdr **plist;
         const char *s_name;
-        char c,s_type[MAXLEN];
-        lword s_addr,s_lma;
+        lword s_addr,s_lma,s_banksz,s_bankof;
+        unsigned s_flags;
+        char c;
         int fl;
 
         back(1);
         s_name = allocstring(keyword);
 
-        if (fl = startofsecdef(&s_addr,s_type,&s_lma)) {
+        if (fl = startofsecdef(&s_addr,&s_flags,&s_lma,&s_banksz,&s_bankof)) {
           dummy_sec = NULL;
           ls = create_lnksect(gv,s_name,ST_UNDEFINED,0,0,0,0);
-          if (!strcmp(s_type,"NOLOAD"))
+          if (s_flags & 1)
             ls->ld_flags |= LSF_NOLOAD;
           if (fl & 4)
             ldefmem = atdefmem;  /* AT(addr) in section definition */
@@ -1633,7 +1656,7 @@ static void add_section_to_segments(struct GlobalVars *gv,
         p->start = p->file_end = ls->copybase;
       if (p->start_vma == ADDR_NONE)
         p->start_vma = ls->base;
-      if ((lword)ls->copybase < p->mem_end) {
+      if (ls->copybase < p->mem_end) {
         /* section conflicts with segment - it doesn't cleanly attach to it */
         error(83,ls->name,(unsigned long long)ls->copybase,
               (unsigned long long)ls->copybase+ls->size,p->name,
@@ -1683,133 +1706,232 @@ static void add_section_to_segments(struct GlobalVars *gv,
 }
 
 
-void free_patterns(char *fpat,char **spatlist)
-/* free file-pattern and section-pattern list, allocated in next_pattern() */
+static void freepatlist(char **patlist)
 {
   char **p;
 
-  if (fpat)
-    free(fpat);
-
-  if (p = spatlist) {
+  if ((p = patlist) != NULL) {
     while (*p) {
       free(*p);
       p++;
     }
-    free(spatlist);
+    free(patlist);
   }
 }
 
 
-static bool parse_pattern(struct GlobalVars *gv,char *keyword,
-                          char **fpat,char ***spatlist)
-/* parse file/section-pattern and allocate pattern-lists */
+void free_patterns(struct Patterns *pat)
+/* free file-pattern and section-pattern list, allocated in next_pattern(),
+   clear structure for reuse */
 {
-  const char *sortcmd = "SORT";
-  char *patternlist[64];   /* yes... it's ugly :| */
+  if (pat->fmatch)
+    free(pat->fmatch);
+  freepatlist(pat->fexclude);
+  freepatlist(pat->smatch);
+  freepatlist(pat->sexclude);
+  memset(pat,0,sizeof(struct Patterns));
+}
+
+
+static char **store_pattern(int idx,char *str)
+/* store pattern string pointer at index idx of a dynamic array */
+{
+  static char **patarr;
+  static int maxidx;
+
+  if (patarr == NULL) {
+    maxidx = 4;
+    patarr = alloc(maxidx*sizeof(char *));
+  }
+  if (idx >= maxidx) {
+    maxidx += maxidx;
+    patarr = re_alloc(patarr,maxidx*sizeof(char *));
+  }
+  patarr[idx] = str;
+  return patarr;
+}
+
+
+static char **makeplist(char **plist,int pcnt)
+{
+  char **new = alloc((pcnt+1) * sizeof(char *));
+
+  memcpy(new,plist,pcnt*sizeof(char *));
+  new[pcnt] = NULL;
+  return new;
+}
+
+
+static char **getpatlist(void)
+/* get list of one or multiple file/section patterns */
+{
+  char *pstr,**plist,**newplist;
   int pcnt = 0;
-  bool sortsec;
 
-  gv->scriptflags &= ~(LDSF_KEEP | LDSF_SORTFIL | LDSF_SORTSEC);
+  while (pstr = getpattern())
+    plist = store_pattern(pcnt++,allocstring(pstr));
+
+  return makeplist(plist,pcnt);
+}
+
+
+static bool filepatcmd(struct GlobalVars *gv,char *keyword,struct Patterns *pat)
+{
   if (!strcmp(keyword,"KEEP")) {
-    if (keyword = getpattern()) {
-      if (getchr() != '(') {
-        error(66,scriptname,getlineno(),'(');  /* '(' expected */
-        back(1);
-        return FALSE;
-      }
-    }
-    else {
-      error(78,scriptname,getlineno());   /* missing argument */
-      return FALSE;
-    }
-    gv->scriptflags |= LDSF_KEEP;
+    pat->flags |= PFL_KEEP;
+    return TRUE;
   }
+  return FALSE;
+}
 
-  if (!strcmp(keyword,sortcmd)) {
-    if (keyword = getpattern()) {
-      if (getchr() != '(') {
-        error(66,scriptname,getlineno(),'(');  /* '(' expected */
-        back(1);
-        return FALSE;
-      }
-    }
-    else {
-      error(78,scriptname,getlineno());   /* missing argument */
-      return FALSE;
-    }
-    gv->scriptflags |= LDSF_SORTFIL;
-  }
-  *fpat = alloc(strlen(keyword)+1);
-  strcpy(*fpat,keyword);
-  if (gv->scriptflags & LDSF_SORTFIL) {
-    if (!endofblock('(',')')) {
-      free(*fpat);
-      return FALSE;
-    }
-  }
 
-  while (keyword = getpattern()) {
-    sortsec = FALSE;
-    if (!strcmp(keyword,sortcmd)) {
-      if (getchr() == '(') {
-        if (!(keyword = getpattern())) {
-          error(78,scriptname,getlineno());   /* missing argument */
-          free(*fpat);
-          return FALSE;
-        }
-      }
-      else {
-        error(66,scriptname,getlineno(),'(');  /* '(' expected */
-        back(1);
-        free(*fpat);
-        return FALSE;
-      }
-      if (!endofblock('(',')')) {
-        free(*fpat);
-        return FALSE;
-      }
-      gv->scriptflags |= LDSF_SORTSEC;
-      sortsec = TRUE;
-    }
-
-    if (pcnt < 63) {
-      patternlist[pcnt] = alloc(strlen(keyword) + (sortsec ? 2 : 1));
-      if (sortsec) {
-        *patternlist[pcnt] = '$';   /* indicate sort-request */
-        strcpy(patternlist[pcnt]+1,keyword);
-      }
-      else
-        strcpy(patternlist[pcnt],keyword);
-      pcnt++;
-    }
-    else
-      ierror("parse_pattern(): pattern buffer overrun");
-  }
-
-  patternlist[pcnt++] = NULL;
-  *spatlist = alloc(pcnt * sizeof(char *));
-  memcpy(*spatlist,patternlist,pcnt*sizeof(char *));
-
-  if (!endofblock('(',')')) {
-    free_patterns(*fpat,*spatlist);
+static bool maxsortlev(struct Patterns *pat)
+{
+  if (pat->ssortlev >= PSORT_MAXLEV) {
+    error(167,scriptname,getlineno(),PSORT_MAXLEV);  /* max sorting level */
     return FALSE;
   }
-  if (gv->scriptflags & LDSF_KEEP) {
+  return TRUE;
+}
+
+
+static void pat_newsort(struct Patterns *pat,unsigned smode)
+{
+  if (maxsortlev(pat)) {
+    pat->ssort[pat->ssortlev] &= ~PSORT_MODE;
+    pat->ssort[pat->ssortlev++] |= smode;
+  }
+}
+
+
+static bool sectpatcmd(struct GlobalVars *gv,char *keyword,struct Patterns *pat)
+{
+  if (keyword == NULL)
+    return FALSE;
+
+  if (getchr() == '(') {
+    if (!strcmp(keyword,"SORT_BY_NAME") || !strcmp(keyword,"SORT")) {
+      pat_newsort(pat,PSORT_NAME);
+      return TRUE;
+    }
+    else if (!strcmp(keyword,"SORT_BY_ALIGNMENT")) {
+      pat_newsort(pat,PSORT_ALIGN);
+      return TRUE;
+    }
+    else if (!strcmp(keyword,"SORT_BY_SIZE")) {
+      pat_newsort(pat,PSORT_SIZE);
+      return TRUE;
+    }
+    else if (!strcmp(keyword,"REVERSE")) {
+      if (maxsortlev(pat))
+        pat->ssort[pat->ssortlev] ^= PSORT_REV;
+      return TRUE;
+    }
+  }
+
+  back(1);
+  return FALSE;
+}
+
+
+static bool excludecmd(struct GlobalVars *gv,char *keyword,struct Patterns *pat)
+{
+  if (keyword) {
+    if (getchr() == '(') {
+      char **plist = NULL;
+
+      if (!strcmp(keyword,"EXCLUDE_FILE")) {
+        if (pat->fexclude)
+          error(168,scriptname,getlineno(),"FILE");  /* multiple EXCLUDE_FILE */
+        pat->fexclude = plist = getpatlist();
+      }
+      else if (!strcmp(keyword,"EXCLUDE_SECTION")) {
+        if (pat->sexclude)
+          error(168,scriptname,getlineno(),"SECTION");  /* multiple EXCLUDE_SECTION */
+        pat->sexclude = plist = getpatlist();
+      }
+      else {
+        back(1);
+        return FALSE;
+      }
+
+      if (!expectchr(')')) {
+        freepatlist(plist);
+        return FALSE;
+      }
+      return TRUE;
+    }
+    back(1);
+  }
+  return FALSE;
+}
+
+
+static bool parse_pattern(struct GlobalVars *gv,
+                          char *keyword,struct Patterns *pat)
+/* Parse file/section-pattern and allocate pattern-lists.
+   Note, that a keyword/pattern and an opening parentheses was already parsed! */
+{
+  int parens = 1;  /* parentheses counter */
+  int pcnt = 0;    /* number of patterns in list */
+  char **plist;
+
+  pat->flags = 0;
+  pat->ssort[0] = pat->ssort[1] = PSORT_NONE;
+
+  /* must start with a file-pattern or a command */
+  while (filepatcmd(gv,keyword,pat)) {
+    if (keyword = getpattern()) {
+      if (!expectchr('('))
+        return FALSE;
+    }
+    else {
+      error(78,scriptname,getlineno());   /* missing argument */
+      return FALSE;
+    }
+    parens++;
+  }
+
+  /* store file pattern */
+  pat->fmatch = allocstring(keyword);
+
+  /* exclude-commands come first in front of the section patterns */
+  do {
+    keyword = getpattern();
+  } while (excludecmd(gv,keyword,pat));
+
+  /* handle potential sort-commands arround the section patterns */
+  while (sectpatcmd(gv,keyword,pat)) {
+    if ((keyword = getpattern()) == NULL) {
+      error(78,scriptname,getlineno());   /* missing argument */
+      return FALSE;
+    }
+    parens++;
+  }
+
+  /* store section patterns */
+  if (keyword == NULL)
+    keyword = "*";
+  do {
+    plist = store_pattern(pcnt++,allocstring(keyword));
+  } while (keyword = getpattern());
+  pat->smatch = makeplist(plist,pcnt);
+
+  /* finally collect all missing closing parentheses */
+  while (parens--) {
     if (!endofblock('(',')')) {
-      free_patterns(*fpat,*spatlist);
+      free_patterns(pat);
       return FALSE;
     }
   }
-  return TRUE;
+  return TRUE;  /* Pattern record is valid */
 }
 
 
 static struct Section *make_data_element(struct GlobalVars *gv)
 /* Construct a section for a new data element (BYTE, SHORT, ...) */
 {
-  bool be = gv->endianness == _BIG_ENDIAN_;
-  uint8_t *data = alloc(datasize);
+  uint8_t *data = alloc(tbytes(gv,datasize));
   struct Section *sec;
   const char *name;
 
@@ -1821,15 +1943,14 @@ static struct Section *make_data_element(struct GlobalVars *gv)
     name = current_ls->name;  /* name is not important */
 
   switch (datasize) {
-    case 1: *data = dataval; break;
-    case 2: write16(be,data,dataval); break;
-    case 4: write32(be,data,dataval); break;
-    case 8: write64(be,data,dataval); break;
+    case 1: writetbyte(gv,data,dataval); break;
+    case 2: writetbytes(gv,2,data,dataval); break;
+    case 4: writetbytes(gv,4,data,dataval); break;
+    case 8: writetbytes(gv,8,data,dataval); break;
     default: ierror("make_data_element"); break;
   }
 
-  sec = create_section(script_obj,name,data,
-                       (datasize*8+gv->bits_per_tbyte-1)/gv->bits_per_tbyte);
+  sec = create_section(script_obj,name,data,datasize);
   sec->type = ST_DATA;
   addtail(&script_obj->sections,&sec->n);
   return sec;
@@ -1875,55 +1996,7 @@ static struct Section *reserve_space(struct GlobalVars *gv)
 }
 
 
-int test_pattern(struct GlobalVars *gv,char **fpat,char ***spatlist)
-/* Provides next file/section-patterns, but doesn't execute any commands
-   or assignments. It will remember the initial parsing state to
-   do it a second time for real with next_pattern().
-   Return Codes: 0=no more patterns, -1=pattern, >0=alignment */
-{
-  char c,*keyword;
-
-  if (!secdefbase) {
-    secdefbase = gettxtptr();
-    secdefline = getlineno();
-  }
-  *fpat = NULL;
-  *spatlist = NULL;
-  level = 2;
-
-  do {
-    while (keyword = getpattern()) {
-      if (check_command(gv,keyword,SCMDF_IGNORE|SCMDF_SECDEF)) {
-        if (datasize)
-          return dataalign;
-        continue;
-      }
-      else {
-        c = getchr();
-        if (c == '=') {
-          skip_expr(0);
-        }
-        else if (c == '(') {
-          if (parse_pattern(gv,keyword,fpat,spatlist))
-            return -1;
-        }
-        else {
-          /* unknown keyword ignored */
-          error(65,scriptname,getlineno(),keyword);
-          back(1);
-        }
-      }
-    }
-  }
-  while (getchr() == ';');
-  back(1);
-
-  level = 1;
-  return 0;
-}
-
-
-struct Section *next_pattern(struct GlobalVars *gv,char **fpat,char ***spatlist)
+struct Section *next_pattern(struct GlobalVars *gv,struct Patterns *pat)
 /* Provides next file-pattern and a list of section-patterns, when present.
    Returns NULL, when section definition is closed,
    a section pointer for a data element to insert (BYTE, SHORT, LONG, ...),
@@ -1935,13 +2008,6 @@ struct Section *next_pattern(struct GlobalVars *gv,char **fpat,char ***spatlist)
   char c,*keyword;
 
   level = 2;
-  *fpat = NULL;
-  *spatlist = NULL;
-  if (secdefbase) {
-    /* reset to beginning of section definition */
-    init_parser(gv,scriptname,secdefbase,secdefline);
-    secdefbase = NULL;
-  }
 
   do {
     while (keyword = getpattern()) {
@@ -1958,7 +2024,7 @@ struct Section *next_pattern(struct GlobalVars *gv,char **fpat,char ***spatlist)
           symbol_assignment(gv,keyword,0);
         }
         else if (c == '(') {
-          if (parse_pattern(gv,keyword,fpat,spatlist))
+          if (parse_pattern(gv,keyword,pat))
             return VALIDPAT;
         }
         else
@@ -2073,24 +2139,27 @@ struct LinkedSection *next_secdef(struct GlobalVars *gv)
 
       else {
         /* check for section definition */
-        char s_type[MAXLEN];
         struct LinkedSection *ls;
         int ret;
-        lword s_addr,s_lma;
+        lword s_addr,s_lma,s_banksz,s_bankof;
+        unsigned s_flags;
 
         back(1);
         if (ls = find_lnksec(gv,keyword,0,0,0,0)) {
           current_ls = ls;
-          if (ret = startofsecdef(&s_addr,s_type,&s_lma)) {
+          if (ret = startofsecdef(&s_addr,&s_flags,&s_lma,&s_banksz,&s_bankof)) {
+            if (s_banksz) {
+              ls->banksize = s_banksz;
+              ls->bankoffs = s_bankof;
+            }
             if (ret & 2)
               change_address(ls->relocmem,s_addr);
             if (ret & 4) {
               if (ls->destmem == ls->relocmem)
-                ls->destmem = add_memblock("lma",MEM_DEFORG,MEM_DEFLEN);
+                ls->destmem = add_memblock("lma",MEM_DEFORG,MEM_DEFLEN,MEM_NOID);
               change_address(ls->destmem,s_lma);
             }
 
-            secdefbase = NULL;
             return ls;
           }
         }
@@ -2162,8 +2231,8 @@ void init_ld_script(struct GlobalVars *gv)
     preparse = TRUE;
     current_ls = NULL;
     level = 0; /* outside SECTIONS block */
-    defmem = add_memblock(defmemname,MEM_DEFORG,MEM_DEFLEN);
-    atdefmem = add_memblock("lmadefault",MEM_DEFORG,MEM_DEFLEN);
+    defmem = add_memblock(defmemname,MEM_DEFORG,MEM_DEFLEN,MEM_NOID);
+    atdefmem = add_memblock("lmadefault",MEM_DEFORG,MEM_DEFLEN,MEM_NOID);
     vdefmem = ldefmem = defmem;
     change_address(defmem,gv->start_addr);
     if (!(scriptname = gv->scriptname))

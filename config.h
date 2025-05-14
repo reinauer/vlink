@@ -1,8 +1,8 @@
-/* $VER: vlink config.h V0.16h (28.01.21)
+/* $VER: vlink config.h V0.18 (29.11.24)
  *
  * This file is part of vlink, a portable linker for multiple
  * object formats.
- * Copyright (c) 1997-2021  Frank Wille
+ * Copyright (c) 1997-2024  Frank Wille
  */
 
 #ifndef CONFIG_H
@@ -46,6 +46,7 @@
 #define XFILE               /* Sharp X68000 Human68k XFile format */
 #define OS_9                /* OS-9 6809 reentrant modules */
 #define O65                 /* o65 6502/65816 object/executable file format */
+#define APPLE_OMF           /* Apple 65816 OMF */
 
 #define ELF32               /* general 32-bit ELF support */
 #define ELF32_PPC_BE        /* ELF PowerPC 32-Bit Big Endian */
@@ -77,11 +78,11 @@
 #define CBMPRG              /* Commodore PET, VIC-20, 64, etc. program */
 #define COCOML              /* Tandy Color Computer machine lang. file */
 #define DRAGONBIN           /* Dragon DOS binary format */
+#define FOENIX              /* Foenix 65816 PGX and PGZ formats */
 #define IHEX                /* Intel Hex */
 #define JAGSRV              /* Jaguar Server (SkunkBoard, VirtualJaguar) */
 #define ORICMC              /* ORIC machine code file header */
-#define RAWBIN1             /* single raw binary file */
-#define RAWBIN2             /* multiple raw binary files */
+#define RAWBIN              /* raw binary file (single, multiple, coalesced) */
 #define RAWSEG              /* multiple raw segment files */
 #define SINCQL              /* Sinclair QL, QDOS header or XTcc trailer */
 #define SHEX1               /* Customer specific hex format */

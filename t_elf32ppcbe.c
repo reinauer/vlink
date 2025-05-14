@@ -1,8 +1,8 @@
-/* $VER: vlink t_elf32ppcbe.c V0.15a (28.02.15)
+/* $VER: vlink t_elf32ppcbe.c V0.18 (26.01.24)
  *
  * This file is part of vlink, a portable linker for multiple
  * object formats.
- * Copyright (c) 1997-2015  Frank Wille
+ * Copyright (c) 1997-2015,2024  Frank Wille
  */
 
 
@@ -10,6 +10,7 @@
 #if defined(ELF32_PPC_BE) || defined(ELF32_AMIGA)
 #define T_ELF32PPCBE_C
 #include "vlink.h"
+#include "cpurelocs.h"
 #include "elf32.h"
 #include "rel_elfppc.h"
 
@@ -27,6 +28,7 @@ static void ppc32be_writeexec(struct GlobalVars *,FILE *);
 
 struct FFFuncs fff_elf32ppcbe = {
   "elf32ppcbe",
+  NULL,
   NULL,
   NULL,
   NULL,
@@ -73,6 +75,7 @@ struct FFFuncs fff_elf32powerup = {
   NULL,
   NULL,
   NULL,
+  NULL,
   elf32_headersize,
   ppc32be_identify,
   ppc32be_readconv,
@@ -102,6 +105,7 @@ struct FFFuncs fff_elf32morphos = {
   NULL,
   NULL,
   NULL,
+  NULL,
   elf32_headersize,
   ppc32be_identify,
   ppc32be_readconv,
@@ -127,6 +131,7 @@ struct FFFuncs fff_elf32morphos = {
 
 struct FFFuncs fff_elf32amigaos = {
   "elf32amigaos",
+  NULL,
   NULL,
   NULL,
   NULL,
@@ -202,8 +207,8 @@ static int ppc32be_identify(struct GlobalVars *gv,char *name,uint8_t *p,
 }
 
 
-static uint8_t setupRI(uint8_t rtype,struct ELF2vlink *convert,
-                       struct RelocInsert *ri1,struct RelocInsert *ri2)
+static int setupRI(uint8_t rtype,struct ELF2vlink *convert,
+                   struct RelocInsert *ri1,struct RelocInsert *ri2)
 {
   ri1->bpos = convert[rtype].bpos;
   ri1->bsiz = convert[rtype].bsiz;
@@ -219,7 +224,7 @@ static uint8_t setupRI(uint8_t rtype,struct ELF2vlink *convert,
 }
 
 
-static uint8_t ppc32_reloc_elf2vlink(uint8_t rtype,struct RelocInsert *ri)
+static int ppc32_reloc_elf2vlink(uint8_t rtype,struct RelocInsert *ri)
 /* Determine vlink internal reloc type from ELF reloc type and fill in
    reloc-insert description information.
    All fields of the RelocInsert structure are preset to zero. */
@@ -227,76 +232,76 @@ static uint8_t ppc32_reloc_elf2vlink(uint8_t rtype,struct RelocInsert *ri)
   /* Reloc conversion table for V.4-ABI @@@ not complete! */
   static struct ELF2vlink convertV4[] = {
     R_NONE,0,0,-1,
-    R_ABS,0,32,-1,              /* R_PPC_ADDR32 */
-    R_ABS,6,24,~3,              /* R_PPC_ADDR24 */
-    R_ABS,0,16,-1,              /* R_PPC_ADDR16 */
-    R_ABS,0,16,0xffff,          /* R_PPC_ADDR16_LO */
-    R_ABS,0,16,0xffff0000,      /* R_PPC_ADDR16_HI */
-    R_ABS,0,16,0,               /* R_PPC_ADDR16_HA */
-    R_ABS,16,14,~3,             /* R_PPC_ADDR14 */
-    R_ABS,16,14,~3,             /* R_PPC_ADDR14_BRTAKEN */
-    R_ABS,16,14,~3,             /* R_PPC_ADDR14_BRNTAKEN */
-    R_PC,6,24,~3,               /* R_PPC_REL24 */
-    R_PC,16,14,~3,              /* R_PPC_REL14 */
-    R_PC,16,14,~3,              /* R_PPC_REL14_BRTAKEN */
-    R_PC,16,14,~3,              /* R_PPC_REL14_BRNTAKEN */
-    R_GOT,0,16,-1,              /* R_PPC_GOT16 */
-    R_GOT,0,16,0xffff,          /* R_PPC_GOT16_LO */
-    R_GOT,0,16,0xffff0000,      /* R_PPC_GOT16_HI */
-    R_GOT,0,16,0,               /* R_PPC_GOT16_HA */
-    R_PLTPC,6,24,~3,            /* R_PPC_PLTREL24 */
-    R_COPY,0,32,-1,             /* R_PPC_COPY */
-    R_GLOBDAT,0,32,-1,          /* R_PPC_GLOB_DAT */
-    R_JMPSLOT,0,64,-1,          /* R_PPC_JMP_SLOT */
-    R_LOADREL,0,32,-1,          /* R_PPC_RELATIVE */
-    R_LOCALPC,6,24,~3,          /* R_PPC_LOCAL24PC */
-    R_UABS,0,32,-1,             /* R_PPC_UADDR32 */
-    R_UABS,0,16,-1,             /* R_PPC_UADDR16 */
-    R_PC,0,32,-1,               /* R_PPC_REL32 */
-    R_PLT,0,32,-1,              /* R_PPC_PLT32 */
-    R_PLTPC,0,32,-1,            /* R_PPC_PLTREL32 */
-    R_PLT,0,16,0xffff,          /* R_PPC_PLT16_LO */
-    R_PLT,0,16,0xffff0000,      /* R_PPC_PLT16_HI */
-    R_PLT,0,16,0,               /* R_PPC_PLT16_HA */
-    R_SD,0,16,-1,               /* R_PPC_SDAREL16 */
-    R_SECOFF,0,16,-1,           /* R_PPC_SECTOFF */
-    R_SECOFF,0,16,0xffff,       /* R_PPC_SECTOFF_LO */
-    R_SECOFF,0,16,0xffff0000,   /* R_PPC_SECTOFF_HI */
-    R_SECOFF,0,16,0,            /* R_PPC_SECTOFF_HA */
-    R_ABS,0,30,~3               /* R_PPC_ADDR30 */
+    R_ABS,0,32,-1,                    /* R_PPC_ADDR32 */
+    R_ABS|R_S,6,24,~3,                /* R_PPC_ADDR24 */
+    R_ABS,0,16,-1,                    /* R_PPC_ADDR16 */
+    R_ABS,0,16,0xffff,                /* R_PPC_ADDR16_LO */
+    R_ABS,0,16,0xffff0000,            /* R_PPC_ADDR16_HI */
+    R_ABS,0,16,0,                     /* R_PPC_ADDR16_HA */
+    R_ABS|R_S,16,14,~3,               /* R_PPC_ADDR14 */
+    R_ABS|R_S,16,14,~3,               /* R_PPC_ADDR14_BRTAKEN */
+    R_ABS|R_S,16,14,~3,               /* R_PPC_ADDR14_BRNTAKEN */
+    R_PC|R_S,6,24,~3,                 /* R_PPC_REL24 */
+    R_PC|R_S,16,14,~3,                /* R_PPC_REL14 */
+    R_PC|R_S,16,14,~3,                /* R_PPC_REL14_BRTAKEN */
+    R_PC|R_S,16,14,~3,                /* R_PPC_REL14_BRNTAKEN */
+    R_GOT,0,16,-1,                    /* R_PPC_GOT16 */
+    R_GOT,0,16,0xffff,                /* R_PPC_GOT16_LO */
+    R_GOT,0,16,0xffff0000,            /* R_PPC_GOT16_HI */
+    R_GOT,0,16,0,                     /* R_PPC_GOT16_HA */
+    R_PLTPC|R_S,6,24,~3,              /* R_PPC_PLTREL24 */
+    R_COPY,0,32,-1,                   /* R_PPC_COPY */
+    R_GLOBDAT,0,32,-1,                /* R_PPC_GLOB_DAT */
+    R_JMPSLOT,0,64,-1,                /* R_PPC_JMP_SLOT */
+    R_LOADREL,0,32,-1,                /* R_PPC_RELATIVE */
+    R_LOCALPC|R_S,6,24,~3,            /* R_PPC_LOCAL24PC */
+    R_UABS,0,32,-1,                   /* R_PPC_UADDR32 */
+    R_UABS,0,16,-1,                   /* R_PPC_UADDR16 */
+    R_PC|R_S,0,32,-1,                 /* R_PPC_REL32 */
+    R_PLT,0,32,-1,                    /* R_PPC_PLT32 */
+    R_PLTPC|R_S,0,32,-1,              /* R_PPC_PLTREL32 */
+    R_PLT,0,16,0xffff,                /* R_PPC_PLT16_LO */
+    R_PLT,0,16,0xffff0000,            /* R_PPC_PLT16_HI */
+    R_PLT,0,16,0,                     /* R_PPC_PLT16_HA */
+    R_SD|R_S,0,16,-1,                 /* R_PPC_SDAREL16 */
+    R_SECOFF,0,16,-1,                 /* R_PPC_SECTOFF */
+    R_SECOFF,0,16,0xffff,             /* R_PPC_SECTOFF_LO */
+    R_SECOFF,0,16,0xffff0000,         /* R_PPC_SECTOFF_HI */
+    R_SECOFF,0,16,0,                  /* R_PPC_SECTOFF_HA */
+    R_ABS,0,30,~3                     /* R_PPC_ADDR30 */
   };
   /* Reloc conversion table for PPC-EABI @@@ not complete! */
   static struct ELF2vlink convertEABI[] = {
-    R_NONE,0,0,-1,              /* R_PPC_EMB_NADDR32 */
-    R_NONE,0,0,-1,              /* R_PPC_EMB_NADDR16 */
-    R_NONE,0,0,-1,              /* R_PPC_EMB_NADDR16_LO */
-    R_NONE,0,0,-1,              /* R_PPC_EMB_NADDR16_HI */
-    R_NONE,0,0,-1,              /* R_PPC_EMB_NADDR16_HA */
-    R_NONE,0,0,-1,              /* R_PPC_EMB_SDAI16 */
-    R_NONE,0,0,-1,              /* R_PPC_EMB_SDA2I16 */
-    R_SD2,0,16,-1,              /* R_PPC_EMB_SDA2REL */
-    R_SD21,16,16,-1,            /* R_PPC_EMB_SDA21 */
-    R_NONE,0,0,-1,              /* R_PPC_EMB_MRKREF */
-    R_NONE,0,0,-1,              /* R_PPC_EMB_RELSEC16 */
-    R_NONE,0,0,-1,              /* R_PPC_EMB_RELST_LO */
-    R_NONE,0,0,-1,              /* R_PPC_EMB_RELST_HI */
-    R_NONE,0,0,-1,              /* R_PPC_EMB_RELST_HA */
-    R_NONE,0,0,-1,              /* R_PPC_EMB_BIT_FLD */
-    R_NONE,0,0,-1               /* R_PPC_EMB_RELSDA */
+    R_NONE,0,0,-1,                    /* R_PPC_EMB_NADDR32 */
+    R_NONE,0,0,-1,                    /* R_PPC_EMB_NADDR16 */
+    R_NONE,0,0,-1,                    /* R_PPC_EMB_NADDR16_LO */
+    R_NONE,0,0,-1,                    /* R_PPC_EMB_NADDR16_HI */
+    R_NONE,0,0,-1,                    /* R_PPC_EMB_NADDR16_HA */
+    R_NONE,0,0,-1,                    /* R_PPC_EMB_SDAI16 */
+    R_NONE,0,0,-1,                    /* R_PPC_EMB_SDA2I16 */
+    RPPC_SD2|R_S,0,16,-1,             /* R_PPC_EMB_SDA2REL */
+    RPPC_SD21|R_S,16,16,-1,           /* R_PPC_EMB_SDA21 */
+    R_NONE,0,0,-1,                    /* R_PPC_EMB_MRKREF */
+    R_NONE,0,0,-1,                    /* R_PPC_EMB_RELSEC16 */
+    R_NONE,0,0,-1,                    /* R_PPC_EMB_RELST_LO */
+    R_NONE,0,0,-1,                    /* R_PPC_EMB_RELST_HI */
+    R_NONE,0,0,-1,                    /* R_PPC_EMB_RELST_HA */
+    R_NONE,0,0,-1,                    /* R_PPC_EMB_BIT_FLD */
+    R_NONE,0,0,-1                     /* R_PPC_EMB_RELSDA */
   };
   /* Reloc conversion table for MorphOS */
   static struct ELF2vlink convertMOS[] = {
-    R_MOSDREL,0,16,-1,          /* R_PPC_MORPHOS_DREL */
-    R_MOSDREL,0,16,0xffff,      /* R_PPC_MORPHOS_DREL_LO */
-    R_MOSDREL,0,16,0xffff0000,  /* R_PPC_MORPHOS_DREL_HI */
-    R_MOSDREL,0,16,0,           /* R_PPC_MORPHOS_DREL_HA */
+    RPPC_MOSDREL|R_S,0,16,-1,         /* R_PPC_MORPHOS_DREL */
+    RPPC_MOSDREL|R_S,0,16,0xffff,     /* R_PPC_MORPHOS_DREL_LO */
+    RPPC_MOSDREL|R_S,0,16,0xffff0000, /* R_PPC_MORPHOS_DREL_HI */
+    RPPC_MOSDREL|R_S,0,16,0,          /* R_PPC_MORPHOS_DREL_HA */
   };
   /* Reloc conversion table for AmigaOS/PPC */
   static struct ELF2vlink convertAOS[] = {
-    R_AOSBREL,0,16,-1,          /* R_PPC_AMIGAOS_BREL */
-    R_AOSBREL,0,16,0xffff,      /* R_PPC_AMIGAOS_BREL_LO */
-    R_AOSBREL,0,16,0xffff0000,  /* R_PPC_AMIGAOS_BREL_HI */
-    R_AOSBREL,0,16,0,           /* R_PPC_AMIGAOS_BREL_HA */
+    RPPC_AOSBREL|R_S,0,16,-1,         /* R_PPC_AMIGAOS_BREL */
+    RPPC_AOSBREL|R_S,0,16,0xffff,     /* R_PPC_AMIGAOS_BREL_LO */
+    RPPC_AOSBREL|R_S,0,16,0xffff0000, /* R_PPC_AMIGAOS_BREL_HI */
+    RPPC_AOSBREL|R_S,0,16,0,          /* R_PPC_AMIGAOS_BREL_HA */
   };
 
   static struct RelocInsert ri2;
@@ -738,12 +743,12 @@ static uint8_t ppc32_reloc_vlink2elf(struct Reloc *r)
 
       /* Embedded and OS-specific relocs */
 
-      case R_SD2:
+      case RPPC_SD2:
         if (f==FSTD && size==16)
           rt = R_PPC_EMB_SDA2REL;
         break;
 
-      case R_SD21:
+      case RPPC_SD21:
         if (f==FSTD && size==16) {
           r->offset -= 2;
           ri->bpos += 16;
@@ -751,7 +756,7 @@ static uint8_t ppc32_reloc_vlink2elf(struct Reloc *r)
         }
         break;
 
-      case R_MOSDREL:
+      case RPPC_MOSDREL:
         switch (f) {
           case FSTD:
             if (size == 16)
@@ -763,7 +768,7 @@ static uint8_t ppc32_reloc_vlink2elf(struct Reloc *r)
         }
         break;
 
-      case R_AOSBREL:
+      case RPPC_AOSBREL:
         switch (f) {
           case FSTD:
             if (size == 16)
@@ -942,7 +947,7 @@ static void morphos_writeexec(struct GlobalVars *gv,FILE *f)
           struct Symbol *sym = (struct Symbol *)ls->symbols.first;
           struct Symbol *nextsym;
           unsigned long bss_offset = bss_sec->offset;
-          lword bss_va = (lword)(ls->base + bss_offset);
+          lword bss_va = ls->base + bss_offset;
 
           sbss = create_lnksect(gv,sbss_name,ST_UDATA,
                                 ls->flags|SF_UNINITIALIZED,

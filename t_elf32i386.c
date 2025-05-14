@@ -1,8 +1,8 @@
-/* $VER: vlink t_elf32i386.c V0.15a (28.02.15)
+/* $VER: vlink t_elf32i386.c V0.18 (26.01.24)
  *
  * This file is part of vlink, a portable linker for multiple
  * object formats.
- * Copyright (c) 1997-2015  Frank Wille
+ * Copyright (c) 1997-2015,2024  Frank Wille
  */
 
 
@@ -27,6 +27,7 @@ static void i386_writeexec(struct GlobalVars *,FILE *);
 
 struct FFFuncs fff_elf32i386 = {
   "elf32i386",
+  NULL,
   NULL,
   NULL,
   NULL,
@@ -69,6 +70,7 @@ static void aros_writeexec(struct GlobalVars *,FILE *);
 
 struct FFFuncs fff_elf32aros = {
   "elf32aros",
+  NULL,
   NULL,
   NULL,
   NULL,
@@ -118,7 +120,7 @@ static int i386_identify(struct GlobalVars *gv,char *name,uint8_t *p,
 }
 
 
-static uint8_t i386_reloc_elf2vlink(uint8_t rtype,struct RelocInsert *ri)
+static int i386_reloc_elf2vlink(uint8_t rtype,struct RelocInsert *ri)
 /* Determine vlink internal reloc type from ELF reloc type and fill in
    reloc-insert description information.
    All fields of the RelocInsert structure are preset to zero. */
@@ -126,16 +128,16 @@ static uint8_t i386_reloc_elf2vlink(uint8_t rtype,struct RelocInsert *ri)
   /* Reloc conversion table for V.4-ABI */
   static struct ELF2vlink convertV4[] = {
     R_NONE,0,0,-1,
-    R_ABS,0,32,-1,              /* R_386_32 */
-    R_PC,0,32,-1,               /* R_386_PC32 */
-    R_GOT,0,32,-1,              /* R_386_GOT32 */
-    R_PLT,0,32,-1,              /* R_386_PLT32 */
-    R_COPY,0,32,-1,             /* R_386_COPY */
-    R_GLOBDAT,0,32,-1,          /* R_386_GLOB_DAT */
-    R_JMPSLOT,0,0,-1,           /* R_386_JMP_SLOT */
-    R_LOADREL,0,32,-1,          /* R_386_RELATIVE */
-    R_GOTOFF,0,32,-1,           /* R_386_GOTOFF */
-    R_GOTPC,0,32,-1             /* R_386_GOTPC */
+    R_ABS,0,32,-1,                  /* R_386_32 */
+    R_PC|R_S,0,32,-1,               /* R_386_PC32 */
+    R_GOT,0,32,-1,                  /* R_386_GOT32 */
+    R_PLT,0,32,-1,                  /* R_386_PLT32 */
+    R_COPY,0,32,-1,                 /* R_386_COPY */
+    R_GLOBDAT,0,32,-1,              /* R_386_GLOB_DAT */
+    R_JMPSLOT,0,0,-1,               /* R_386_JMP_SLOT */
+    R_LOADREL,0,32,-1,              /* R_386_RELATIVE */
+    R_GOTOFF,0,32,-1,               /* R_386_GOTOFF */
+    R_GOTPC|R_S,0,32,-1             /* R_386_GOTPC */
   };
 
   if (rtype <= R_386_GOTPC) {

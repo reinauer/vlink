@@ -12,9 +12,86 @@ vlink history
 (aoutmint):   changes are relevant for MiNT only
 (os9):        changes are relevant for OS-9 modules
 (vobj):       changes for VOBJ format
-(tos):        changes for the Atari TOS format
+(tos):        changes for the Atari TOS/DRI format
 (xfile):      changes for the Sharp X68000 XFile format
 
+
+- 0.18 (31.12.2024)
+o Define for each relocation type whether it is signed, unsigned or
+  unknown, to provide better range checks.
+o Make the range-checking work with sign-extended addresses (Example:
+  m68k 16-bit absolute addressing).
+o When an output section's memory region has not enough space the linker
+  will look for the next matching output section.
+o Linker script function KEEP() now really prevents garbage collection of
+  sections.
+o Sorting and exclusion functions for linker script section patterns:
+  SORT_BY_ALIGNMENT(), SORT_BY_NAME(), SORT_BY_SIZE(), REVERSE(), EXCLUDE_FILE(),
+  EXCLUDE_SECTION(). Supporting up to two sorting levels.
+o The output section's bank size can be defined by (BANKSIZE=n) in the
+  script, so input sections may not cross bank borders. In that case they
+  will be aligned to the beginning of the next bank.
+o Linker script MEMORY definitions now support an optional ID=n argument,
+  where n defines an identification value which can be referenced by a
+  VOBJ-specific relocation type (MEMID).
+o Can find first executable code-section now, when no start symbol is present.
+o Portable pattern matching routine, used for Windows and TOS, did
+  case-insensitive string comparisons in the past.
+o Absolute symbols are printed as a separate section into the map file.
+o Support LINKONCE section flag.
+o New options -symfile, -symfmt and -symctrl to output symbol/value pairs
+  into a file using the given printf-format string.
+o New options -obe and -ole to specify the endianess of octets within
+  a target-byte (when it has more than 8 bits) when writing the contents
+  of a section to a file system.
+o New option -lineoffsets to output a separate file with source line
+  offsets per section.
+o New option -mattr to merge all sections with same attributes, when
+  linking without a linker script.
+o The target file formats rawbin1 and rawbin2 were replaced by a common
+  rawbin format. rawbin2 is now -brawbin with -multifile option. The old
+  target names are still supported for backwards compatibility.
+o New target file formats "foenixpgx-c02", "foenixpgx-816", "foenixpgz-24"
+  and "foenixpgz-32" for Foenix retro computers.
+o New target file format "appleomf" can generate relocatable load-files for
+  Apple IIgs computers.
+o Merge options -mrel, -mtype and -mall also work with -r now, when
+  creating a new relocatable object file.
+o Linker script commands BYTE, SHORT, LONG, QUAD, SQUAD do now create
+  1, 2, 4 or 8 target-bytes and no longer 8, 16, 32, 64-bit values.
+o Relocatable/Abs symbols with the same name have precedence before Common
+  symbols and do not cause a multiple-definition error.
+o Starting vlink without arguments only shows a short list of options now.
+  For a detailed description use -h, which also includes target-specific
+  options selected by -b.
+o Fixed output section trimming in the linker script.
+o Fix error message for unknown target file formats (-b).
+o (ados/ehf) New option -kick1 makes sure the generated executable is
+  comaptible with the Kickstart 1.x loader.
+o (ados/ehf) Allow symbol redefinitions from pulled library units, as long
+  as their target CPU differs (M68k/PPC WarpOS mixed binaries). This
+  only worked for symbols from code sections, since V0.17.
+o (elf) Fixed uninitialized .plt at end of text segment.
+o (tos) Can use DRI object files and libraries as input now. HiSoft and
+  SozobonX symbol name extensions are supported.
+o (tos) TOS executable files do work as input and DRI objects as output (-r).
+o (tos) Enable SozobonX symbol names with -tos-sozobonx.
+o (tos) Disable the HiSoft symbol name extension in executables with
+  -tos-stddri.
+o (rawbin) Fixed missing byte in the ORIC tape header and automatically
+  remove a ".tap" extension from the name stored there.
+o (rawbin) IHEX supports architectures with more than 8 bits per byte.
+  But note that the address is still incremented in 8-bit steps.
+o (rawbin) Make sure the file size is even, when using a QDOS header.
+o (rawbin) Fixed raw reloc table output (-q) for a relocation at offset 0.
+o (rawbin) New options -fill, -coalesced and -multifile (previously rawbin2).
+o (vobj) Supports -r option to output a relocatable VOBJ file.
+  Option -vobj2 may be used to write that file in VOBJ v2 format.
+o (vobj) -vobjcpu option selects the name of the target CPU.
+o (vobj) Supports VOBJ v2 format (vasm -Fvobj -vobj2) and PPC non-standard
+  relocations (EABI, MorphOS, AmigaOS).
+o (xfile) Entry address is written to the header.
+o (xfile) New option -x-high sets the high-address flag in the header.
 
 - 0.17a (22.09.22)
 o Fixed segfault following a syntax error in the linker script.

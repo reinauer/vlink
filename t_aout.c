@@ -1,4 +1,4 @@
-/* $VER: vlink t_aout.c V0.16i (14.11.21)
+/* $VER: vlink t_aout.c V0.18 (23.12.24)
  *
  * This file is part of vlink, a portable linker for multiple
  * object formats.
@@ -22,7 +22,6 @@ static const char *aout_symnames[] = {
 #define PLTSYM          1
 #define DYNAMICSYM      2
 
-static struct ar_info ai;     /* for scanning library archives */
 static uint8_t sectype[] = { N_TEXT, N_DATA, N_BSS };
 static uint8_t weaktype[] = { N_WEAKT, N_WEAKD, N_WEAKB };
 
@@ -82,6 +81,7 @@ int aout_identify(struct FFFuncs *ff,char *name,struct aout_hdr *p,
 /* check a possible a.out file against the requirements, then */
 /* return its type (object, library, shared object) */
 {
+  struct ar_info ai;
   uint32_t mid = ff->id;
   bool arflag = FALSE;
 
@@ -733,6 +733,8 @@ void aoutstd_read(struct GlobalVars *gv,struct LinkFile *lf,
 void aoutstd_readconv(struct GlobalVars *gv,struct LinkFile *lf)
 /* Read a.out executable / object / shared obj. with standard relocs */
 {
+  struct ar_info ai;
+
   if (lf->type == ID_LIBARCH) {
     if (ar_init(&ai,(char *)lf->data,lf->length,lf->filename)) {
       while (ar_extract(&ai)) {
@@ -1064,14 +1066,14 @@ uint32_t aout_addrelocs(struct GlobalVars *gv,struct LinkedSection **ls,
       if (rel->rtype == R_SD) {
         /* GNU-binutiles (Amiga 68k) compatible implementation, .data-based */
         if (rsec==2 && ls[1]!=NULL && ls[2]!=NULL)
-          a = (lword)(ls[2]->base - ls[1]->base) + rel->addend;  /* .bss */
+          a = (ls[2]->base - ls[1]->base) + rel->addend;  /* .bss */
         else
           a = rel->addend;  /* .data */
       }
       else if (rel->rtype == R_PC)
-        a = rel->addend - ((lword)ls[sec]->base + rel->offset);
+        a = rel->addend - (ls[sec]->base + rel->offset);
       else
-        a = (lword)ls[rsec]->base + rel->addend;
+        a = ls[rsec]->base + rel->addend;
       /* @@@ calculation for other relocs: jmptab,load-relative? */
 
       writesection(gv,ls[sec]->data,rel->offset,rel,a);
@@ -1094,7 +1096,7 @@ uint32_t aout_addrelocs(struct GlobalVars *gv,struct LinkedSection **ls,
 
       /* fix addend for a.out and write into the section */
       if (rel->rtype == R_PC)
-        a = rel->addend - (lword)(ls[sec]->base + rel->offset);
+        a = rel->addend - (ls[sec]->base + rel->offset);
       else
         a = rel->addend;
       /* @@@ calculation for other relocs: baserel,jmptab,load-relative? */
@@ -1209,7 +1211,8 @@ void aout_pagedsection(struct GlobalVars *gv,FILE *f,
   if (ls[sec]) {
     fwritex(f,ls[sec]->data,ls[sec]->size);
     fwritegap(gv,f,aout_getpagedsize(gv,ls,sec) -
-              (sec ? ls[sec]->size : ls[sec]->size+sizeof(struct aout_hdr)));
+              (sec ? ls[sec]->size : ls[sec]->size+sizeof(struct aout_hdr)),
+              0);
   }
 }
 
@@ -1246,10 +1249,8 @@ void aout_writestrings(FILE *f,int be)
 {
   if (aoutstrlist.nextoffset > 4) {
     struct StrTabNode *stn;
-    uint32_t len;
 
-    write32(be,&len,aoutstrlist.nextoffset);
-    fwritex(f,&len,4);
+    fwrite32(be,f,aoutstrlist.nextoffset);
     while (stn = (struct StrTabNode *)remhead(&aoutstrlist.l))
       fwritex(f,stn->str,strlen(stn->str)+1);
   }

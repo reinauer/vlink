@@ -7,7 +7,7 @@ RM = delete force quiet
 
 CC = vc +aosppc
 CCOUT = -o $(DUMMYVARIABLE)	# produces the string "-o "
-COPTS = -c -O1
+CFLAGS = -c -O1
 CONFIG = -DAMIGAOS -D__USE_INLINE__
 
 LD = vc +aosppc

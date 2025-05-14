@@ -1,8 +1,8 @@
-/* $VER: vlink t_xfile.c V0.16c (10.03.19)
+/* $VER: vlink t_xfile.c V0.18 (23.12.24)
  *
  * This file is part of vlink, a portable linker for multiple
  * object formats.
- * Copyright (c) 1997-2019  Frank Wille
+ * Copyright (c) 1997-2019,2024  Frank Wille
  */
 
 #include "config.h"
@@ -12,6 +12,8 @@
 #include "xfile.h"
 
 
+static int options(struct GlobalVars *,int,const char **,int *);
+static void printhelp(void);
 static int identify(struct GlobalVars *,char *,uint8_t *,unsigned long,bool);
 static void readconv(struct GlobalVars *,struct LinkFile *);
 static int targetlink(struct GlobalVars *,struct LinkedSection *,
@@ -27,7 +29,8 @@ struct FFFuncs fff_xfile = {
   defaultscript,
   NULL,
   NULL,
-  NULL,
+  options,
+  printhelp,
   headersize,
   identify,
   readconv,
@@ -50,6 +53,25 @@ struct FFFuncs fff_xfile = {
   32,1,
   FFF_BASEINCR
 };
+
+/* options */
+static uint8_t loadmode;
+
+
+static int options(struct GlobalVars *gv,int argc,const char *argv[],int *i)
+{
+  if (!strcmp(argv[*i],"-x-high"))
+    loadmode = XLMD_HIGHADDR;
+  else return 0;
+
+  return 1;
+}
+
+
+static void printhelp(void)
+{
+  printf("-x-high           set high-address loading mode\n");
+}
 
 
 
@@ -110,13 +132,17 @@ static void xfile_initwrite(struct GlobalVars *gv,
 }
 
 
-static void xfile_header(FILE *f,unsigned long tsize,unsigned long dsize,
+static void xfile_header(FILE *f,unsigned long baseaddr,unsigned long execaddr,
+                         unsigned long tsize,unsigned long dsize,
                          unsigned long bsize)
 {
   XFile hdr;
 
   memset(&hdr,0,sizeof(XFile));
   write16be(hdr.x_id,0x4855);  /* "HU" ID for Human68k */
+  hdr.x_loadmode = loadmode;
+  write32be(hdr.x_baseaddr,baseaddr);
+  write32be(hdr.x_execaddr,execaddr-baseaddr);
   write32be(hdr.x_textsz,tsize);
   write32be(hdr.x_datasz,dsize);
   write32be(hdr.x_heapsz,bsize);
@@ -262,23 +288,27 @@ static void writeexec(struct GlobalVars *gv,FILE *f)
   int i;
 
   xfile_initwrite(gv,sections);
-  xfile_header(f,sections[0] ? sections[0]->size+sections[0]->gapsize : 0,
-               sections[1] ? sections[1]->size+sections[1]->gapsize : 0,
-               sections[2] ? sections[2]->size : 0);
 
   for (i=0; i<3; i++)
     calc_relocs(gv,sections[i]);
 
+  xfile_header(f,sections[0]->base,entry_address(gv),
+               sections[0] ? sections[0]->size+sections[0]->gapsize : 0,
+               sections[1] ? sections[1]->size+sections[1]->gapsize : 0,
+               sections[2] ? sections[2]->size : 0);
+
   if (sections[0]) {
     fwritex(f,sections[0]->data,sections[0]->filesize);
     fwritegap(gv,f,
-              (sections[0]->size-sections[0]->filesize)+sections[0]->gapsize);
+              (sections[0]->size-sections[0]->filesize)+sections[0]->gapsize,
+              0);
   }
 
   if (sections[1]) {
     fwritex(f,sections[1]->data,sections[1]->filesize);
     fwritegap(gv,f,
-              (sections[1]->size-sections[1]->filesize)+sections[1]->gapsize);
+              (sections[1]->size-sections[1]->filesize)+sections[1]->gapsize,
+              0);
   }
 
   relocsz = xfile_writerelocs(gv,f,sections);

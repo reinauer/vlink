@@ -58,6 +58,7 @@ struct FFFuncs fff_aoutnull = {
   NULL,
   NULL,
   NULL,
+  NULL,
   aout_headersize,
   aoutnull_identify,
   aoutstd_readconv,

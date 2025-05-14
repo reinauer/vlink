@@ -1,8 +1,8 @@
-/* $VER: vlink amigahunks.h V0.15a (09.12.15)
+/* $VER: vlink amigahunks.h V0.18 (29.08.24)
  *
  * This file is part of vlink, a portable linker for multiple
  * object formats.
- * Copyright (c) 1997-2015  Frank Wille
+ * Copyright (c) 1997-2024  Frank Wille
  */
 
 
@@ -74,6 +74,10 @@
 /* EHF extensions */
 #define EXT_RELREF26      229
 
+/* GCC BFD amigaos type-flags (m68k only!) */
+#define EXTF_WEAK         0x40
+#define EXTF_LOCAL        0x20
+
 /* memory attributes */
 #define MEMF_PUBLIC       1
 #define MEMF_CHIP         2
@@ -102,13 +106,4 @@ struct XRefNode {
   uint32_t com_size;
   int noffsets;
   struct list xreflist;
-};
-
-#define SUBID_LINE 1
-struct LineDebug {
-  struct TargetExt tgext;   /* id = TGEXT_AMIGAOS, subid = SUBID_LINE */
-  const char *source_name;  /* full path to source text */
-  uint32_t num_entries;     /* number of entries in line/offset table */
-  uint32_t *lines;
-  uint32_t *offsets;
 };

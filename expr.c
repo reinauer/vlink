@@ -1,8 +1,8 @@
-/* $VER: vlink expr.c V0.17a (23.04.22)
+/* $VER: vlink expr.c V0.18 (26.12.24)
  *
  * This file is part of vlink, a portable linker for multiple
  * object formats.
- * Copyright (c) 1997-2022  Frank Wille
+ * Copyright (c) 1997-2024  Frank Wille
  */
 
 
@@ -63,14 +63,26 @@ char getchr(void)
 }
 
 
-int testchr(char c)
+bool testchr(char c)
 /* check for character, skip it and return true when present */
 {
   if (*s == c) {
     s++;
-    return 1;
+    return TRUE;
   }
-  return 0;
+  return FALSE;
+}
+
+
+bool expectchr(char c)
+/* expect a character, print error and return false otherwise */
+{
+  if (getchr() != c) {
+    error(66,scriptname,line,c);  /* c expected */
+    back(1);
+    return FALSE;
+  }
+  return TRUE;
 }
 
 
@@ -277,7 +289,7 @@ static struct Expr *primary_expr(void)
               val = sym->value;
             }
             else if (sym->type==SYM_RELOC && sym->relsect->lnksec!=NULL) {
-              val = (lword)sym->relsect->va + sym->value;
+              val = sym->relsect->va + sym->value;
               type = REL;
             }
             else {

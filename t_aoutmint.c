@@ -1,4 +1,4 @@
-/* $VER: vlink t_aoutmint.c V0.16h (16.01.21)
+/* $VER: vlink t_aoutmint.c V0.18 (23.12.24)
  *
  * This file is part of vlink, a portable linker for multiple
  * object formats.
@@ -57,6 +57,7 @@ struct FFFuncs fff_aoutmint = {
   NULL,
   NULL,
   tos_options,
+  tos_printhelp,
   aout_headersize,
   aoutmint_identify,
   aoutstd_readconv,
@@ -181,11 +182,13 @@ static void aoutmint_writeexec(struct GlobalVars *gv,FILE *f)
   /* write sections */
   fwritex(f,sections[0]->data,sections[0]->filesize);
   fwritegap(gv,f,
-            (sections[0]->size-sections[0]->filesize)+sections[0]->gapsize);
+            (sections[0]->size-sections[0]->filesize)+sections[0]->gapsize,
+            0);
   if (sections[1]) {
     fwritex(f,sections[1]->data,sections[1]->filesize);
     fwritegap(gv,f,
-              (sections[1]->size-sections[1]->filesize)+sections[1]->gapsize);
+              (sections[1]->size-sections[1]->filesize)+sections[1]->gapsize,
+              0);
   }
 
   /* write a.out symbols */

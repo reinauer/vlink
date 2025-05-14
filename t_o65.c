@@ -1,8 +1,8 @@
-/* $VER: vlink t_o65.c V0.16i (31.01.22)
+/* $VER: vlink t_o65.c V0.18 (09.06.24)
  *
  * This file is part of vlink, a portable linker for multiple
  * object formats.
- * Copyright (c) 1997-2022  Frank Wille
+ * Copyright (c) 1997-2024  Frank Wille
  */
 
 #include "config.h"
@@ -15,6 +15,8 @@
 
 static int options_02(struct GlobalVars *,int,const char **,int *);
 static int options_816(struct GlobalVars *,int,const char **,int *);
+static void printhelp_02(void);
+static void printhelp_816(void);
 static int identify_02(struct GlobalVars *,char *,uint8_t *,unsigned long,bool);
 static int identify_816(struct GlobalVars *,char *,uint8_t *,unsigned long,bool);
 static void readconv(struct GlobalVars *,struct LinkFile *);
@@ -34,6 +36,7 @@ struct FFFuncs fff_o6502 = {
   NULL,
   NULL,
   options_02,
+  printhelp_02,
   headersize,
   identify_02,
   readconv,
@@ -63,6 +66,7 @@ struct FFFuncs fff_o65816 = {
   NULL,
   NULL,
   options_816,
+  printhelp_816,
   headersize,
   identify_816,
   readconv,
@@ -86,7 +90,6 @@ struct FFFuncs fff_o65816 = {
   FFF_BASEINCR
 };
 
-static struct ar_info ai;     /* for scanning library archives */
 struct ImportList o65implist; /* list of externally referenced symbol names */
 
 static int o65size;           /* words are 2 or 4 bytes */
@@ -195,6 +198,32 @@ static int options_816(struct GlobalVars *gv,int argc,const char **argv,int *i)
 }
 
 
+static void printhelp(int cpu816)
+{
+  printf("-o65-align <val>  min.alignment (# of bits to be 0): 0, 1, 2 or 8\n"
+         "-o65-author <n>   store author name in header\n"
+         "-o65-bsszero      request automatic clearing of BSS section\n");
+  if (!cpu816)
+    printf("-o65-cpu <model>  6502, 65c02, 65sc02, 65ce02, nmos6502, 65816\n");
+  printf("-o65-fopts        gen. info in header: file/linker-name, version, date\n"
+         "-o65-name <name>  overwrite fopts name\n"
+         "-o65-paged        paged alignment and simplified paged relocations\n"
+         "-o65-stack <val>  store required stack size in the header\n");
+}
+
+
+static void printhelp_02(void)
+{
+  printhelp(0);
+}
+
+
+static void printhelp_816(void)
+{
+  printhelp(1);
+}
+
+
 
 /*****************************************************************/
 /*                          Read o65                             */
@@ -255,7 +284,7 @@ static void o65_newsec(struct o65info *o65,int secno,uint8_t align)
     SP_READ|SP_EXEC,SP_READ|SP_WRITE,SP_READ|SP_WRITE,SP_READ|SP_WRITE
   };
   static uint8_t flags[NSECS] = {
-    SF_ALLOC,SF_ALLOC,SF_ALLOC|SF_UNINITIALIZED,SF_ALLOC|SF_UNINITIALIZED
+    SF_ALLOC,SF_ALLOC,SF_ALLOC|SF_UNINITIALIZED,SF_ALLOC|SF_UNINITIALIZED|SF_DPAGE
   };
   static const char *names[NSECS] = {
     TEXTNAME,DATANAME,BSSNAME,ZERONAME
@@ -304,6 +333,7 @@ static int o65_getrelocs(struct GlobalVars *gv,struct o65info *o65,int secno)
 {
   struct FFFuncs *ff = fff[o65->object->lnkfile->format];
   int pagedrel = o65->mode & MO65_PAGED;
+  int wdc816 = o65->mode & MO65_65816;
   struct Section *sec = o65->sec[secno];
   uint8_t *d = o65->data[secno];
   struct Section *rsec;
@@ -352,7 +382,7 @@ static int o65_getrelocs(struct GlobalVars *gv,struct o65info *o65,int secno)
     switch (R65TYPE(b)) {
       case 0x80:  /* 16-bit address */
         a = read16le(d+off);
-        m = -1;
+        m = wdc816 ? 0xffff : -1;  /* ignore bank-byte for 65816 */
         sz = 16;
         break;
       case 0x40:  /* address high-byte */
@@ -519,6 +549,7 @@ static int identify(char *name,uint8_t *p,unsigned long plen,
                     bool lib,int cpu816)
 /* identify an o65 object file or executable */
 {
+  struct ar_info ai;
   bool arflag = FALSE;
   uint16_t mode;
 
@@ -530,6 +561,7 @@ static int identify(char *name,uint8_t *p,unsigned long plen,
       return ID_IGNORE;
     }
     p = ai.data;
+    plen = ai.size;
   }
 
   if (plen < sizeof(o65magic)+2 || memcmp(p,o65magic,sizeof(o65magic))!=0)
@@ -561,6 +593,8 @@ static int identify_816(struct GlobalVars *gv,char *name,uint8_t *p,
 
 static void readconv(struct GlobalVars *gv,struct LinkFile *lf)
 {
+  struct ar_info ai;
+
   if (lf->type == ID_LIBARCH) {
     if (ar_init(&ai,(char *)lf->data,lf->length,lf->filename)) {
       while (ar_extract(&ai)) {
@@ -709,7 +743,7 @@ static int o65_simple(struct LinkedSection **secs)
   if (i < ZSEC) {
     for (addr=secs[i]->base; i<ZSEC; i++) {
       if (secs[i] != NULL) {
-        if ((lword)secs[i]->base != addr)
+        if (secs[i]->base != addr)
           return 0;
         addr += secs[i]->size;
       }

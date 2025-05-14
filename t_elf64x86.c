@@ -1,8 +1,8 @@
-/* $VER: vlink t_elf64x86.c V0.16d (28.02.20)
+/* $VER: vlink t_elf64x86.c V0.18 (26.01.24)
  *
  * This file is part of vlink, a portable linker for multiple
  * object formats.
- * Copyright (c) 1997-2020  Frank Wille
+ * Copyright (c) 1997-2020,2024  Frank Wille
  */
 
 
@@ -24,6 +24,7 @@ static void x86_64_writeexec(struct GlobalVars *,FILE *);
 
 struct FFFuncs fff_elf64x86 = {
   "elf64x86",
+  NULL,
   NULL,
   NULL,
   NULL,
@@ -68,7 +69,7 @@ static int x86_64_identify(struct GlobalVars *gv,char *name,uint8_t *p,
 }
 
 
-static uint8_t x86_64_reloc_elf2vlink(uint8_t rtype,struct RelocInsert *ri)
+static int x86_64_reloc_elf2vlink(uint8_t rtype,struct RelocInsert *ri)
 /* Determine vlink internal reloc type from ELF reloc type and fill in
    reloc-insert description information.
    All fields of the RelocInsert structure are preset to zero. */
@@ -76,21 +77,21 @@ static uint8_t x86_64_reloc_elf2vlink(uint8_t rtype,struct RelocInsert *ri)
   /* Reloc conversion table for V.4-ABI */
   static struct ELF2vlink convertV4[] = {
     R_NONE,0,0,-1,
-    R_ABS,0,64,-1,              /* R_X86_64_64 */
-    R_PC,0,32,-1,               /* R_X86_64_PC32 */
-    R_GOT,0,32,-1,              /* R_X86_64_GOT32 */
-    R_PLT,0,32,-1,              /* R_X86_64_PLT32 */
-    R_COPY,0,64,-1,             /* R_X86_64_COPY */
-    R_GLOBDAT,0,64,-1,          /* R_X86_64_GLOB_DAT */
-    R_JMPSLOT,0,0,-1,           /* R_X86_64_JUMP_SLOT */
-    R_LOADREL,0,64,-1,          /* R_X86_64_RELATIVE */
-    R_GOTPC,0,32,-1,            /* R_X86_64_GOTPCREL @@@ */
-    R_ABS,0,32,-1,              /* R_X86_64_32 */
-    R_ABS,0,32,-1,              /* R_X86_64_32S @@@ signed 32-bit? */
-    R_ABS,0,16,-1,              /* R_X86_64_16 */
-    R_PC,0,16,-1,               /* R_X86_64_PC16 */
-    R_ABS,0,8,-1,               /* R_X86_64_8 */
-    R_PC,0,8,-1                 /* R_X86_64_PC8 */
+    R_ABS,0,64,-1,                  /* R_X86_64_64 */
+    R_PC|R_S,0,32,-1,               /* R_X86_64_PC32 */
+    R_GOT,0,32,-1,                  /* R_X86_64_GOT32 */
+    R_PLT,0,32,-1,                  /* R_X86_64_PLT32 */
+    R_COPY,0,64,-1,                 /* R_X86_64_COPY */
+    R_GLOBDAT,0,64,-1,              /* R_X86_64_GLOB_DAT */
+    R_JMPSLOT,0,0,-1,               /* R_X86_64_JUMP_SLOT */
+    R_LOADREL,0,64,-1,              /* R_X86_64_RELATIVE */
+    R_GOTPC|R_S,0,32,-1,            /* R_X86_64_GOTPCREL @@@ */
+    R_ABS,0,32,-1,                  /* R_X86_64_32 */
+    R_ABS|R_S,0,32,-1,              /* R_X86_64_32S */
+    R_ABS,0,16,-1,                  /* R_X86_64_16 */
+    R_PC|R_S,0,16,-1,               /* R_X86_64_PC16 */
+    R_ABS,0,8,-1,                   /* R_X86_64_8 */
+    R_PC|R_S,0,8,-1                 /* R_X86_64_PC8 */
   };
 
   if (rtype <= R_X86_64_PC8) {

@@ -17,12 +17,12 @@ RM = rem
 CC = cl
 CCOUT = /Fo
 # use /Dsnprintf=_snprintf for older VSC++ versions which are not C99-compliant!
-#COPTS = /nologo /O2 /MT /Zp1 /Dsnprintf=_snprintf /c	# use /MT for static linking
-#COPTS = /nologo /O2 /MD /Dsnprintf=_snprintf /c
-COPTS = /nologo /O2 /MD /c
-COPTS = $(COPTS) /wd4996				# Disable warning regarding deprecated functions 
+#CFLAGS = /nologo /O2 /MT /Zp1 /Dsnprintf=_snprintf /c	# use /MT for static linking
+#CFLAGS = /nologo /O2 /MD /Dsnprintf=_snprintf /c
+CFLAGS = /nologo /O2 /MD /c
+CFLAGS = $(CFLAGS) /wd4996				# Disable warning regarding deprecated functions 
 							# ("use strcpy_s instead of strcpy" etc)
-COPTS = $(COPTS) $(WIN32_PLATFORMSDK_INCLUDE)
+CFLAGS = $(CFLAGS) $(WIN32_PLATFORMSDK_INCLUDE)
 CONFIG =
 
 LD = link

@@ -305,7 +305,7 @@ struct RelocNode {
 
 /* for conversion from ELF reloc types to vlink internal format */
 struct ELF2vlink {
-  uint8_t rtype;
+  int rtype;
   uint16_t bpos;
   uint16_t bsiz;
   lword mask;

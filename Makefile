@@ -7,7 +7,7 @@ RM = rm -f
 
 CC = gcc
 CCOUT = -o $(DUMMYVARIABLE)	# produces the string "-o "
-COPTS = -std=c99 -pedantic -O2 -fomit-frame-pointer -c
+CFLAGS = -std=c99 -pedantic -O2 -fomit-frame-pointer -c
 CONFIG =
 
 LD = $(CC)

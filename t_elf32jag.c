@@ -1,8 +1,8 @@
-/* $VER: vlink t_elf32jag.c V0.15b (17.08.16)
+/* $VER: vlink t_elf32jag.c V0.18 (04.02.24)
  *
  * This file is part of vlink, a portable linker for multiple
  * object formats.
- * Copyright (c) 1997-2016  Frank Wille
+ * Copyright (c) 1997-2016,2024  Frank Wille
  */
 
 
@@ -22,6 +22,7 @@ static void jag_writeexec(struct GlobalVars *,FILE *);
 
 struct FFFuncs fff_elf32jag = {
   "elf32jag",
+  NULL,
   NULL,
   NULL,
   NULL,
@@ -64,7 +65,7 @@ static int jag_identify(struct GlobalVars *gv,char *name,uint8_t *p,
 }
 
 
-static uint8_t jag_reloc_elf2vlink(uint8_t rtype,struct RelocInsert *ri)
+static int jag_reloc_elf2vlink(uint8_t rtype,struct RelocInsert *ri)
 /* Determine vlink internal reloc type from ELF reloc type and fill in
    reloc-insert description information.
    All fields of the RelocInsert structure are preset to zero. */
@@ -73,17 +74,17 @@ static uint8_t jag_reloc_elf2vlink(uint8_t rtype,struct RelocInsert *ri)
 
   static struct ELF2vlink convert[] = {
     R_NONE,0,0,-1,
-    R_ABS,0,32,-1,              /* R_JAG_ABS32 */
-    R_ABS,0,16,-1,              /* R_JAG_ABS16 */
-    R_ABS,0,8,-1,               /* R_JAG_ABS8 */
-    R_PC,0,32,-1,               /* R_JAG_REL32 */
-    R_PC,0,16,-1,               /* R_JAG_REL16 */
-    R_PC,0,8,-1,                /* R_JAG_REL8 */
-    R_ABS,6,5,0x1f,             /* R_JAG_ABS5 */
-    R_PC,6,5,0x1f,              /* R_JAG_REL5 */
-    R_PC,6,5,0x3e,              /* R_JAG_JR */
-    R_ABS,16,16,0xffff0000,     /* R_JAG_ABS32SWP */
-    R_PC,16,16,0xffff0000       /* R_JAG_REL32SWP */
+    R_ABS,0,32,-1,                  /* R_JAG_ABS32 */
+    R_ABS,0,16,-1,                  /* R_JAG_ABS16 */
+    R_ABS,0,8,-1,                   /* R_JAG_ABS8 */
+    R_PC|R_S,0,32,-1,               /* R_JAG_REL32 */
+    R_PC|R_S,0,16,-1,               /* R_JAG_REL16 */
+    R_PC|R_S,0,8,-1,                /* R_JAG_REL8 */
+    R_ABS,6,5,-1,                   /* R_JAG_ABS5 */
+    R_PC|R_S,6,5,-1,                /* R_JAG_REL5 */
+    R_PC|R_S,6,5,~1,                /* R_JAG_JR */
+    R_ABS,16,16,~0xffff,            /* R_JAG_ABS32SWP */
+    R_PC|R_S,16,16,~0xffff          /* R_JAG_REL32SWP */
   };
 
   if (rtype <= R_JAG_REL32SWP) {
@@ -92,7 +93,7 @@ static uint8_t jag_reloc_elf2vlink(uint8_t rtype,struct RelocInsert *ri)
     ri->mask = convert[rtype].mask;
     rtype = convert[rtype].rtype;
 
-    if (ri->mask == 0xffff0000) {
+    if (ri->mask == ~0xffff) {
       /* R_JAG_xxxSWP - add a second RelocInsert */
       ri2 = *ri;
       ri2.bpos = 0;
@@ -158,14 +159,14 @@ static uint8_t jag_reloc_vlink2elf(struct Reloc *r)
     struct RelocInsert *ri2 = ri->next;
 
     if (pos==6 && siz==5) {
-      if (mask == 0x1f)
+      if (mask == ~0)
         rt = r->rtype==R_ABS ? R_JAG_ABS5 : R_JAG_REL5;
-      else if (mask == 0x3e)
+      else if (mask == ~1)
         rt = R_JAG_JR;
     }
     else if ((pos&15)==0 && siz==32 && ri2!=NULL && ri2->bsiz==32 &&
-             (mask==0xffff0000 || mask==0xffff) &&
-             (ri2->mask==0xffff0000 || ri2->mask==0xffff) &&
+             (mask==~0xffff || mask==0xffff) &&
+             (ri2->mask==~0xffff || ri2->mask==0xffff) &&
              mask!=ri2->mask) {
       r->offset += mask==0xffff ? (pos >> 3) : (ri2->bpos >> 3);
       rt = r->rtype==R_ABS ? R_JAG_ABS32SWP : R_JAG_REL32SWP;

@@ -1,8 +1,8 @@
-/* $VER: vlink t_elf32arm.c V0.13 (02.11.10)
+/* $VER: vlink t_elf32arm.c V0.18 (26.01.24)
  *
  * This file is part of vlink, a portable linker for multiple
  * object formats.
- * Copyright (c) 1997-2010  Frank Wille
+ * Copyright (c) 1997-2010,2024  Frank Wille
  */
 
 
@@ -23,6 +23,7 @@ static void armle_writeexec(struct GlobalVars *,FILE *);
 
 struct FFFuncs fff_elf32armle = {
   "elf32armle",
+  NULL,
   NULL,
   NULL,
   NULL,
@@ -67,7 +68,7 @@ static int armle_identify(struct GlobalVars *gv,char *name,uint8_t *p,
 }
 
 
-static uint8_t armle_reloc_elf2vlink(uint8_t rtype,struct RelocInsert *ri)
+static int armle_reloc_elf2vlink(uint8_t rtype,struct RelocInsert *ri)
 /* Determine vlink internal reloc type from ELF reloc type and fill in
    reloc-insert description information.
    All fields of the RelocInsert structure are preset to zero. */
@@ -75,22 +76,20 @@ static uint8_t armle_reloc_elf2vlink(uint8_t rtype,struct RelocInsert *ri)
   /* Reloc conversion table for V.4-ABI - @@@ INCOMPLETE!!! */
   static struct ELF2vlink convertV4[] = {
     R_NONE,0,0,-1,
-    R_PC,8,24,0x3fffffc,        /* PC24, deprecated! Use CALL or JUMP24! */
-    R_ABS,0,32,-1,              /* ABS32 */
-    R_PC,0,32,-1,               /* REL32 */
-    R_PC,20,12,0x1fff,          /* LDR_PC_G0 */
-    R_ABS,0,16,-1,              /* ABS16 */
-    R_ABS,20,12,0xfff,          /* ABS12 */
-    R_ABS,5,5,0x1f,             /* THM_ABS5 */
-    R_ABS,0,8,-1,               /* ABS8 */
-    R_SD,0,32,-1,               /* SBREL32 */
-    R_PC,5,11,0,                /* THM_CALL, needs 2nd ri */
-    R_PC,8,8,0x3fc,             /* THM_PC8 */
+    R_PC|R_S,8,24,~3,               /* PC24, deprecated! Use CALL or JUMP24! */
+    R_ABS,0,32,-1,                  /* ABS32 */
+    R_PC|R_S,0,32,-1,               /* REL32 */
+    R_PC|R_S,20,12,-1,              /* LDR_PC_G0 */
+    R_ABS,0,16,-1,                  /* ABS16 */
+    R_ABS,20,12,-1,                 /* ABS12 */
+    R_ABS,5,5,0x1f,                 /* THM_ABS5 */
+    R_ABS,0,8,-1,                   /* ABS8 */
+    R_SD|R_S,0,32,-1,               /* SBREL32 */
+    R_PC|R_S,5,11,0,                /* THM_CALL, needs 2nd ri */
+    R_PC|R_S,8,8,0x3fc,             /* THM_PC8 */
     R_NONE,0,0,-1,
-    R_ABS,8,24,0xffffff,        /* SWI24, obsolete! */
-    R_ABS,8,8,0xff,             /* THM_SWI8, obsolete! */
-    R_NONE,0,0,-1,
-    R_NONE,0,0,-1,
+    R_ABS,8,24,-1,                  /* SWI24, obsolete! */
+    R_ABS,8,8,0xff,                 /* THM_SWI8, obsolete! */
     R_NONE,0,0,-1,
     R_NONE,0,0,-1,
     R_NONE,0,0,-1,
@@ -102,13 +101,15 @@ static uint8_t armle_reloc_elf2vlink(uint8_t rtype,struct RelocInsert *ri)
     R_NONE,0,0,-1,
     R_NONE,0,0,-1,
     R_NONE,0,0,-1,
-    R_PC,8,24,0x3fffffc,        /* CALL, PC24 for uncond. bl/blx only */
-    R_PC,8,24,0x3fffffc,        /* JUMP24, PC24 for other branches */
     R_NONE,0,0,-1,
     R_NONE,0,0,-1,
-    R_PC,24,8,0xff,             /* ALU_PCREL_7_0, obsolete! */
-    R_PC,24,8,0xff00,           /* ALU_PCREL_15_8, obsolete! */
-    R_PC,24,8,0xff0000,         /* ALU_PCREL_23_15, obsolete! */
+    R_PC|R_S,8,24,~3,               /* CALL, PC24 for uncond. bl/blx only */
+    R_PC|R_S,8,24,~3,               /* JUMP24, PC24 for other branches */
+    R_NONE,0,0,-1,
+    R_NONE,0,0,-1,
+    R_PC|R_S,24,8,0xff,             /* ALU_PCREL_7_0, obsolete! */
+    R_PC|R_S,24,8,0xff00,           /* ALU_PCREL_15_8, obsolete! */
+    R_PC|R_S,24,8,0xff0000,         /* ALU_PCREL_23_15, obsolete! */
     R_NONE,0,0,-1,
     R_NONE,0,0,-1,
     R_NONE,0,0,-1,
@@ -200,9 +201,9 @@ static uint8_t armle_reloc_vlink2elf(struct Reloc *r)
             case 8: return R_ARM_ABS8;
           }
         }
-        else if (size==24 && (pos&31)==8 && mask==0xffffff && !ri2)
+        else if (size==24 && (pos&31)==8 && mask==-1 && !ri2)
           return R_ARM_SWI24; /* @@@ obsolete */
-        else if (size==12 && (pos&31)==20 && mask==0xfff && !ri2)
+        else if (size==12 && (pos&31)==20 && mask==-1 && !ri2)
           return R_ARM_ABS12;
         else if (size==8 && (pos&15)==8 && mask==0xff && !ri2)
           return R_ARM_THM_SWI8; /* @@@ obsolete */
@@ -213,9 +214,9 @@ static uint8_t armle_reloc_vlink2elf(struct Reloc *r)
       case R_PC:
         if (size==32 && !(pos&7) && mask==-1 && !ri2)
           return R_ARM_REL32;
-        else if (size==24 && (pos&31)==8 && mask==0x3fffffc && !ri2)
+        else if (size==24 && (pos&31)==8 && mask==~3 && !ri2)
           return R_ARM_PC24;  /* @@@ deprecated: use R_ARM_CALL/JUMP24!!! */
-        else if (size==12 && (pos&31)==20 && mask==0x1fff && !ri2)
+        else if (size==12 && (pos&31)==20 && mask==-1 && !ri2)
           return R_ARM_LDR_PC_G0;
         else if (size==8 && (pos&31)==24 && mask==0xff && !ri2)
           return R_ARM_ALU_PCREL_7_0;  /* @@@ obsolete */

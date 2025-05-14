@@ -1,8 +1,8 @@
-/* $VER: vlink t_elf64.c V0.17a (30.03.22)
+/* $VER: vlink t_elf64.c V0.18 (23.12.24)
  *
  * This file is part of vlink, a portable linker for multiple
  * object formats.
- * Copyright (c) 1997-2022  Frank Wille
+ * Copyright (c) 1997-2024  Frank Wille
  */
 
 
@@ -171,7 +171,7 @@ static void elf64_symbols(struct GlobalVars *gv,struct Elf64_Ehdr *ehdr,
 static void elf64_dynrefs(struct GlobalVars *gv,struct Elf64_Ehdr *ehdr,
                           struct ObjectUnit *ou,struct Elf64_Shdr *shdr,
                           bool be,
-                          uint8_t (*reloc_elf2vlink)(uint8_t,struct RelocInsert *))
+                          int (*reloc_elf2vlink)(uint8_t,struct RelocInsert *))
 /* Find all relocs in a shared object which refer to an undefined symbol. */
 {
   uint8_t *data = (uint8_t *)ehdr + read64(be,shdr->sh_offset);
@@ -194,7 +194,7 @@ static void elf64_dynrefs(struct GlobalVars *gv,struct Elf64_Ehdr *ehdr,
                             ELF64_R_SYM(read64(be,elfrel->r_info));
     uint32_t shndx = (uint32_t)read16(be,sym->st_shndx);
     struct RelocInsert ri;
-    uint8_t rtype;
+    int rtype;
 
     if (shndx == SHN_UNDEF || shndx == SHN_COMMON) {
       memset(&ri,0,sizeof(struct RelocInsert));
@@ -215,7 +215,7 @@ static void elf64_dynrefs(struct GlobalVars *gv,struct Elf64_Ehdr *ehdr,
 static void elf64_reloc(struct GlobalVars *gv,struct Elf64_Ehdr *ehdr,
                         struct ObjectUnit *ou,struct Elf64_Shdr *shdr,
                         char *shstrtab,bool be,
-                        uint8_t (*reloc_elf2vlink)(uint8_t,struct RelocInsert *))
+                        int (*reloc_elf2vlink)(uint8_t,struct RelocInsert *))
 /* Read ELF64 relocations, which are relative to a defined symbol, into
    the section's reloc-list. If the symbol is undefined, create an
    external reference on it, with the supplied relocation type. */
@@ -256,7 +256,7 @@ static void elf64_reloc(struct GlobalVars *gv,struct Elf64_Ehdr *ehdr,
     struct Reloc *r;
     struct RelocInsert ri;
     lword a;
-    uint8_t rtype;
+    int rtype;
 
     memset(&ri,0,sizeof(struct RelocInsert));
     rtype = reloc_elf2vlink(ELF64_R_TYPE(read64(be,elfrel->r_info)),&ri);
@@ -408,7 +408,7 @@ static void elf64_stabs(struct GlobalVars *gv,struct LinkFile *lf,
 
 void elf64_parse(struct GlobalVars *gv,struct LinkFile *lf,
                  struct Elf64_Ehdr *ehdr,
-                 uint8_t (*reloc_elf2vlink)(uint8_t,struct RelocInsert *))
+                 int (*reloc_elf2vlink)(uint8_t,struct RelocInsert *))
 /* parses a complete ELF file and converts into vlink-internal format */
 {
   static const char *fn = "elf64_parse(): ";
@@ -873,7 +873,7 @@ static void elf64_writephdrs(struct GlobalVars *gv,FILE *f)
         gapsize += sizeof(struct Elf64_Phdr);
     }
   }
-  fwritegap(gv,f,gapsize);  /* gap at the end, for unused PHDRs */
+  fwritegap(gv,f,gapsize,0);  /* gap at the end, for unused PHDRs */
 }
 
 

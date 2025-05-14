@@ -1,8 +1,8 @@
-/* $VER: vlink errors.c V0.17a (25.06.22)
+/* $VER: vlink errors.c V0.18 (31.12.24)
  *
  * This file is part of vlink, a portable linker for multiple
  * object formats.
- * Copyright (c) 1997-2022  Frank Wille
+ * Copyright (c) 1997-2024  Frank Wille
  */
 
 
@@ -96,13 +96,13 @@ static struct {
   "%s: Merging a code section with name \"__MERGED\"",EF_WARNING,
   "Relative references between %s section \"%s\" and %s section "
     "\"%s\" (%s) force a combination of the two",EF_WARNING,
-  "Can't define %s as ctors/dtors label. Symbol already exists.",EF_ERROR,
+  "Can't define %s as ctors/dtors label. Symbol already exists",EF_ERROR,
   "%s: ELF section header type %d in %s is not needed in "          /* 60 */
     "shared objects",EF_WARNING,
   "%s: Endianness differs from previous objects",EF_FATAL,
   "Target file format doesn't support relocatable objects",EF_ERROR,
   "Predefined limits of destination memory region %s "
-    "for section %s were exceeded (%#llx)",EF_FATAL,
+    "for output section %s were exceeded (%#llx)",EF_FATAL,
   "Section %s(%s) was not recognized by target linker script",EF_WARNING,
   "%s line %d: Unknown keyword <%s> ignored",EF_ERROR,              /* 65 */
   "%s line %d: '%c' expected",EF_ERROR,
@@ -206,12 +206,33 @@ static struct {
   "Error number %d is not a warning",EF_FATAL,                      /* 145 */
   "%s (%s): alternating bits per byte in object files (from %d to %d)",EF_FATAL,
   "%s (%s): alternating bytes per address in object files (from %d to %d)",EF_FATAL,
-  "Endianness is unknown. Default to host endianness.",EF_WARNING,
+  "Endianness is unknown. Default to host endianness",EF_WARNING,
   "Mismatching target address sizes in input/output formats",EF_FATAL,
   "%s: Hunk format corrupted: DEBUG hunk used like a section "      /* 150 */
     "with name \"%s\" in unit \"%s\". Trying to ignore",EF_WARNING,
   "%s: Duplicate con/destructor name %s definition ignored",EF_WARNING,
   "Warnings treated as errors",EF_ERROR,
+  "%s: Kickstart 1.x cannot initialize bss sections >256k to zero",EF_WARNING,
+  "No CPU defined for VOBJ output. Consider using -vobjcpu",EF_WARNING,
+  "Indirect symbol %s -> %s not allowed in %s",EF_FATAL,            /* 155 */
+  "Alternating CPU definitions from VOBJ input. Keeping the first one (%s)",
+  EF_WARNING,
+  "Bad symbol file format",EF_ERROR,
+  "No space to fit section %s(%s) with end address %#llx into memory region",
+  EF_ERROR,
+  "%s (%s+%#lx): Reference from overlayed section %s to %s (symbol %s) "
+    "is not allowed (NOCROSSREFS)",EF_ERROR,
+  "Target %s: Too many symbols for selected output format",EF_FATAL,/* 160 */
+  "Invalid version. Assuming V%d.%d",EF_WARNING,
+  "Target %s: Output section %s exceeds maximum size %lu",EF_WARNING,
+  "%s: No valid bank size defined",EF_ERROR,
+  "%s (%s): Section exceeds maximum bank size of %lu",EF_ERROR,
+  "%s (%s+%#lx): output section %s (referenced symbol: %s) has no " /* 165 */
+    "memory id defined, assuming zero",EF_WARNING,
+  "%s (%s+%#lx): reference to memory id of relocatable symbol "     /* !!! */
+    "%s=%#llx%c%#llx (value to write: %s%#llx) doesn't fit into %d bits",EF_ERROR,
+  "%s line %d: Maximum of %d sorting levels exceeded",EF_ERROR,
+  "%s line %d: Multiple EXCLUDE_%s commands in one pattern",EF_ERROR,
 };
 
 

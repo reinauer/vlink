@@ -1,8 +1,8 @@
-/* $VER: vlink tosopts.c V0.16i (31.01.22)
+/* $VER: vlink tosopts.c V0.18 (31.05.24)
  *
  * This file is part of vlink, a portable linker for multiple
  * object formats.
- * Copyright (c) 1997-2022  Frank Wille
+ * Copyright (c) 1997-2024  Frank Wille
  */
 
 #include "config.h"
@@ -10,7 +10,10 @@
 #define TOSOPTS_C
 #include "vlink.h"
 
-uint32_t tos_flags;  /* flags field in TOS header */
+uint32_t tos_flags;    /* flags field in TOS header */
+bool textbasedsyms;    /* symbol offsets based on text section */
+bool sozobonx;         /* SozobonX extension for unlimited symbol name length */
+bool hisoftdri = TRUE; /* HiSoft symbol name extension */
 
 
 int tos_options(struct GlobalVars *gv,int argc,const char *argv[],int *i)
@@ -37,10 +40,30 @@ int tos_options(struct GlobalVars *gv,int argc,const char *argv[],int *i)
   else if (!strcmp(argv[*i],"-tos-readable"))
     tos_flags |= 0x30;
   else if (!strcmp(argv[*i],"-tos-textbased"))
-    gv->textbasedsyms = 1;
+    textbasedsyms = TRUE;
+  else if (!strcmp(argv[*i],"-tos-stddri"))
+    hisoftdri = FALSE;
+  else if (!strcmp(argv[*i],"-tos-sozobonx"))
+    sozobonx = TRUE;
   else
     return 0;
   return 1;
+}
+
+
+void tos_printhelp(void)
+{
+  printf("-tos-flags <val>  TOS header flags (32 bits)\n"
+         "-tos-fastload     Set the fastload bit in the TOS header\n"
+         "-tos-fastram      Set the fastram bit in the TOS header\n"
+         "-tos-fastalloc    Set the fastalloc bit in the TOS header\n"
+         "-tos-private      Mark memory space as private in the TOS header\n"
+         "-tos-global       Mark memory space as global in the TOS header\n"
+         "-tos-super        Mark memory as supervisor-only in the TOS header\n"
+         "-tos-readable     Mark memory as read-only in the TOS header\n"
+         "-tos-sozobonx     Write Sozobon symbol extension (disables HiSoft)\n"
+         "-tos-stddri       Write standard DRI symbols (disables HiSoft)\n"
+         "-tos-textbased    Write Devpac(MonST)-compatible DRI symbols\n");
 }
 
 #endif

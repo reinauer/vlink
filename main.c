@@ -1,8 +1,8 @@
-/* $VER: vlink main.c V0.17a (26.06.22)
+/* $VER: vlink main.c V0.18 (23.12.24)
  *
  * This file is part of vlink, a portable linker for multiple
  * object formats.
- * Copyright (c) 1997-2022  Frank Wille
+ * Copyright (c) 1997-2024  Frank Wille
  */
 
 
@@ -139,6 +139,55 @@ static int flavours_cmp(const void *f1,const void *f2)
 }
 
 
+static unsigned parse_symfile_format(struct GlobalVars *gv,const char *fmt)
+{
+  int mode=0,cnt=0;
+  char *p,*q;
+
+  gv->sym_file_format = p = alloc(strlen(fmt)+4);
+
+  while (*fmt) {
+    if (*fmt == '%') {
+      *p++ = *fmt++;
+      if (*fmt == '%') {  /* "%%" is no extra argument */
+        *p++ = *fmt++;
+        continue;
+      }
+      if (++cnt > 2)
+        return 0;  /* maximum of two arguments (value, name) */
+      q = strpbrk(fmt,"diouXxs%");
+      if (q==NULL || *q=='%')
+        return 0;  /* missing integer or string format code */
+      if (mode == 0)
+        mode = (*q=='s') ? SFF_VALSECOND : SFF_VALFIRST;
+      else if ((mode==SFF_VALFIRST && *q!='s') ||
+               (mode==SFF_VALSECOND && *q=='s'))
+        return 0;  /* forbid integer/string format on both sides */
+
+      while (fmt < q) {
+        if (*fmt=='#' || *fmt=='-' || *fmt=='+' || *fmt==' ' || *fmt=='.' ||
+            isdigit((unsigned char)*fmt))
+          *p++ = *fmt++;
+        else
+          fmt++;  /* ignore the rest, like 'h' or 'l' or '*' */
+      }
+
+      if (*q != 's') {
+        *p++ = 'l';  /* decimal argument is always long long */
+        *p++ = 'l';
+      }
+      *p++ = *q++;
+      fmt = q;
+    }
+    else
+      *p++ = *fmt++;
+  }
+
+  *p = '\0';
+  return mode;
+}
+
+
 void cleanup(struct GlobalVars *gv)
 {
   if (gv->fail_on_warning && gv->warncnt)
@@ -166,6 +215,7 @@ int main(int argc,const char *argv[])
   gv->interp_path = DEFAULT_INTERP_PATH;
   gv->soname = NULL;
   gv->endianness = -1;  /* endianness is unknown */
+  gv->sym_file_format = "0x%08llx:%s";
 
   /* initialize targets */
   for (j=0; fff[j]; j++) {
@@ -195,7 +245,7 @@ int main(int argc,const char *argv[])
   gv->osec_base_name = NULL;
 
   if (argc<2 || (argc==2 && *argv[1]=='?')) {
-    show_usage();
+    show_usage(gv,0);  /* short help text */
     exit(EXIT_SUCCESS);
   }
 
@@ -203,8 +253,9 @@ int main(int argc,const char *argv[])
   for (i=1; i<argc; i++) {
     if (argv[i][0]=='-' && argv[i][1]=='b') {
       int ii = i;
+      const char *arg;
 
-      if (buf = get_option_arg(argc,argv,&i)) {
+      if (buf = arg = get_option_arg(argc,argv,&i)) {
         /* for compatibility with older vlink versions,
            elf32amiga is automatically converted into elf32powerup
            and amigaos into amigahunk */
@@ -212,13 +263,23 @@ int main(int argc,const char *argv[])
           buf = "elf32powerup";
         else if (!strcmp(buf,"amigaos"))
           buf = "amigahunk";
+        else if (!strcmp(buf,"rawbin1") || !strcmp(buf,"rawbin2")) {
+          /* rawbin1 has been replaced by rawbin and rawbin2 by rawbin with
+             -multifile option */
+          buf = "rawbin";
+        }
         for (j=0; fff[j]; j++) {
           if (!strcmp(fff[j]->tname,buf))
             break;
         }
         if (fff[j]) {
           gv->dest_format = (uint8_t)j;
-          argv[ii] = argv[i] = NULL;  /* delete option for next pass */
+          if (!strcmp(arg,"rawbin2")) {
+            argv[i] = NULL;
+            argv[ii] = "-multifile";  /* emulate old -brawbin2 */
+          }
+          else
+            argv[ii] = argv[i] = NULL;  /* delete option for next pass */
         }
       }
     }
@@ -241,8 +302,12 @@ int main(int argc,const char *argv[])
           }
           else if (!strncmp(&argv[i][2],"roken",5))
             goto unknown;
-          else
-            error(9,buf);  /* invalid target format */
+          else {  /* invalid target format */
+            if (!argv[i][2])
+              error(9,argv[++i]);
+            else
+              error(9,&argv[i][2]);
+          }
           break;
 
         case 'c':
@@ -269,6 +334,9 @@ int main(int argc,const char *argv[])
         case 'f':
           if (!strcmp(&argv[i][2],"ixunnamed")) {
             gv->fix_unnamed = TRUE;  /* assign a name to unnamed sections */
+          }
+          else if (!strncmp(&argv[i][2],"ill",3)) {  /* @@@ -fill in rawbin */
+            goto unknown;
           }
           else {  /* set a flavour */
             const char *name,**fl;
@@ -300,7 +368,7 @@ int main(int argc,const char *argv[])
 
         case 'h':
           if (!argv[i][2]) {
-            show_usage();      /* help text */
+            show_usage(gv,1);      /* verbose help text */
             exit(EXIT_SUCCESS);
           }
           else goto unknown;
@@ -317,8 +385,12 @@ int main(int argc,const char *argv[])
           gv->keep_sect_order = TRUE;
           break;
 
-        case 'l':  /* library specifier */
-          if (buf = get_option_arg(argc,argv,&i)) {
+        case 'l':
+          if (!strcmp(&argv[i][2],"ineoffsets")) {
+            gv->lineoffsfile = get_arg(argc,argv,&i);
+          }
+          else if (buf = get_option_arg(argc,argv,&i)) {
+            /* library specifier -l */
             ifn = alloc(sizeof(struct InputFile));
             ifn->name = buf;
             ifn->lib = TRUE;
@@ -347,6 +419,8 @@ int main(int argc,const char *argv[])
             gv->auto_merge = TRUE;
           else if (!strcmp(&argv[i][2],"type"))
             gv->merge_same_type = TRUE;
+          else if (!strcmp(&argv[i][2],"attr"))
+            gv->merge_same_attr = TRUE;
           else if (!strcmp(&argv[i][2],"all"))
             gv->merge_all = TRUE;
           else if (!strcmp(&argv[i][2],"ultibase"))
@@ -373,6 +447,10 @@ int main(int argc,const char *argv[])
             gv->osec_base_name = &argv[i][6];
             gv->output_sections = TRUE;  /* output each section as a file */
           }
+          else if (!strcmp(&argv[i][2],"be"))
+            gv->output_le = FALSE;       /* output target-bytes in BE order */
+          else if (!strcmp(&argv[i][2],"le"))
+            gv->output_le = TRUE;        /* output target-bytes in LE order */
           else if (!strcmp(&argv[i][2],"sec"))
             gv->output_sections = TRUE;  /* output each section as a file */
           else if (strncmp(&argv[i][2],"s9-",3) &&
@@ -415,6 +493,22 @@ int main(int argc,const char *argv[])
             gv->soname = get_arg(argc,argv,&i);
           else if (!strcmp(&argv[i][2],"tatic"))   /* -static */
             gv->dynamic = FALSE;
+          else if (!strcmp(&argv[i][2],"ymfile") &&
+                   (buf = get_arg(argc,argv,&i)) != NULL) {
+            /* -symfile <filename> */
+            gv->sym_file = fopen(buf,"w");
+          }
+          else if (!strcmp(&argv[i][2],"ymfmt")) {   /* -symfmt <format str> */
+            unsigned mode = parse_symfile_format(gv,get_arg(argc,argv,&i));
+            if (!mode)
+              error(157);  /* bad symfile format */
+            gv->sym_file_flags |= mode;
+          }
+          else if (!strncmp(&argv[i][2],"ymctrl=",7)) {  /* -symctrl <flags> */
+            unsigned ctrl;
+            if (sscanf(argv[i]+9,"%u",&ctrl) == 1)
+              gv->sym_file_flags |= ctrl & ~(SFF_VALFIRST|SFF_VALSECOND);
+          }
           else goto unknown;
           break;
 
@@ -431,14 +525,15 @@ int main(int argc,const char *argv[])
             add_symnames(&gv->undef_syms,buf,0);
           break;
 
-        case 'v':  /* show version and target info */
+        case 'v':
           if (!strcmp(&argv[i][2],"icelabels") &&
               (buf = get_arg(argc,argv,&i)) != NULL) {
-            gv->vice_file = fopen(buf,"w");
+            gv->sym_file = fopen(buf,"w");
+            gv->sym_file_format = "al C:%04llx .%s";
           }
           else {
             if (argv[i][2]) goto unknown;
-            show_version();
+            show_version();  /* -v : show version and target info */
             printf("Standard library path: "
 #ifdef LIBPATH
                    LIBPATH
@@ -654,6 +749,8 @@ int main(int argc,const char *argv[])
       addtail(&gv->inputlist,&ifn->n);
     }
   }
+  if (!(gv->sym_file_flags & (SFF_VALFIRST|SFF_VALSECOND)))
+    gv->sym_file_flags |= SFF_VALFIRST;
 
   /* add default library search path at the end of the list */
   if (stdlib) {
@@ -679,11 +776,11 @@ int main(int argc,const char *argv[])
   linker_dynprep(gv);  /* prepare for dynamic linking */
   linker_sectrefs(gv); /* find all referenced sections from the start */
   linker_gcsects(gv);  /* section garbage collection (gc_sects) */
-  linker_join(gv);     /* join sections with same name and type */
+  linker_merge(gv);    /* merge sections by linker script or by name/type */
   linker_mapfile(gv);  /* mapfile output */
   linker_copy(gv);     /* copy section contents and fix symbol offsets */
   linker_delunused(gv);/* delete empty/unused sects. without relocs/symbols */
-  linker_relocate(gv); /* relocate addresses in joined sections */
+  linker_relocate(gv); /* relocate addresses in merged output sections */
   linker_write(gv);    /* write output file in selected target format */
   linker_cleanup(gv);
 

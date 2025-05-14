@@ -1,8 +1,8 @@
-/* $VER: vlink t_elf32m68k.c V0.13 (02.11.10)
+/* $VER: vlink t_elf32m68k.c V0.18 (26.01.24)
  *
  * This file is part of vlink, a portable linker for multiple
  * object formats.
- * Copyright (c) 1997-2010  Frank Wille
+ * Copyright (c) 1997-2010,2024  Frank Wille
  */
 
 
@@ -25,6 +25,7 @@ static void m68k_writeexec(struct GlobalVars *,FILE *);
 
 struct FFFuncs fff_elf32m68k = {
   "elf32m68k",
+  NULL,
   NULL,
   NULL,
   NULL,
@@ -69,35 +70,35 @@ static int m68k_identify(struct GlobalVars *gv,char *name,uint8_t *p,
 }
 
 
-static uint8_t m68k_reloc_elf2vlink(uint8_t rtype,struct RelocInsert *ri)
+static int m68k_reloc_elf2vlink(uint8_t rtype,struct RelocInsert *ri)
 /* Determine vlink internal reloc type from ELF reloc type and fill in
    reloc-insert description information.
    All fields of the RelocInsert structure are preset to zero. */
 {
   static struct ELF2vlink convertV4[] = {
     R_NONE,0,0,-1,
-    R_ABS,0,32,-1,              /* R_68K_32 */
-    R_ABS,0,16,-1,              /* R_68K_16 */
-    R_ABS,0,8,-1,               /* R_68K_8 */
-    R_PC,0,32,-1,               /* R_68K_PC32 */
-    R_PC,0,16,-1,               /* R_68K_PC16 */
-    R_PC,0,8,-1,                /* R_68K_PC8 */
-    R_GOT,0,32,-1,              /* R_68K_GOT32 */
-    R_GOT,0,16,-1,              /* R_68K_GOT16 */
-    R_GOT,0,8,-1,               /* R_68K_GOT8 */
-    R_GOTOFF,0,32,-1,           /* R_68K_GOT32O */
-    R_GOTOFF,0,16,-1,           /* R_68K_GOT16O */
-    R_GOTOFF,0,8,-1,            /* R_68K_GOT8O */
-    R_PLT,0,32,-1,              /* R_68K_PLT32 */
-    R_PLT,0,16,-1,              /* R_68K_PLT16 */
-    R_PLT,0,8,-1,               /* R_68K_PLT8 */
-    R_PLTOFF,0,32,-1,           /* R_68K_PLT32O */
-    R_PLTOFF,0,16,-1,           /* R_68K_PLT16O */
-    R_PLTOFF,0,8,-1,            /* R_68K_PLT8O */
-    R_COPY,0,32,-1,             /* R_68K_COPY */
-    R_GLOBDAT,0,32,-1,          /* R_68K_GLOB_DAT */
-    R_JMPSLOT,0,0,-1,           /* R_68K_JMP_SLOT */
-    R_LOADREL,0,32,-1           /* R_68K_RELATIVE */
+    R_ABS,0,32,-1,                  /* R_68K_32 */
+    R_ABS,0,16,-1,                  /* R_68K_16 */
+    R_ABS,0,8,-1,                   /* R_68K_8 */
+    R_PC|R_S,0,32,-1,               /* R_68K_PC32 */
+    R_PC|R_S,0,16,-1,               /* R_68K_PC16 */
+    R_PC|R_S,0,8,-1,                /* R_68K_PC8 */
+    R_GOT,0,32,-1,                  /* R_68K_GOT32 */
+    R_GOT,0,16,-1,                  /* R_68K_GOT16 */
+    R_GOT,0,8,-1,                   /* R_68K_GOT8 */
+    R_GOTOFF,0,32,-1,               /* R_68K_GOT32O */
+    R_GOTOFF,0,16,-1,               /* R_68K_GOT16O */
+    R_GOTOFF,0,8,-1,                /* R_68K_GOT8O */
+    R_PLT,0,32,-1,                  /* R_68K_PLT32 */
+    R_PLT,0,16,-1,                  /* R_68K_PLT16 */
+    R_PLT,0,8,-1,                   /* R_68K_PLT8 */
+    R_PLTOFF,0,32,-1,               /* R_68K_PLT32O */
+    R_PLTOFF,0,16,-1,               /* R_68K_PLT16O */
+    R_PLTOFF,0,8,-1,                /* R_68K_PLT8O */
+    R_COPY,0,32,-1,                 /* R_68K_COPY */
+    R_GLOBDAT,0,32,-1,              /* R_68K_GLOB_DAT */
+    R_JMPSLOT,0,0,-1,               /* R_68K_JMP_SLOT */
+    R_LOADREL,0,32,-1               /* R_68K_RELATIVE */
   };
 
   if (rtype <= R_68K_RELATIVE) {

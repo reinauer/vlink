@@ -1,19 +1,18 @@
-/* $VER: vlink t_rawbin.c V0.16i (31.01.22)
+/* $VER: vlink t_rawbin.c V0.18 (23.12.24)
  *
  * This file is part of vlink, a portable linker for multiple
  * object formats.
- * Copyright (c) 1997-2022  Frank Wille
+ * Copyright (c) 1997-2024  Frank Wille
  */
 
 
 #include "config.h"
-#if defined(RAWBIN1) || defined(RAWBIN2) || \
+#if defined(RAWBIN) || defined(IHEX) || defined(SHEX1) || \
     defined(SREC19) || defined(SREC28) || defined(SREC37) || \
-    defined(IHEX) || defined(SHEX1) || \
     defined(AMSDOS) || defined(APPLEBIN) || defined(ATARICOM) || \
     defined(BBC) || defined(CBMPRG) || defined(COCOML) || \
-    defined(DRAGONBIN) || defined(JAGSRV) || defined(ORICMC) || \
-    defined(SINCQL)
+    defined(DRAGONBIN) || defined(FOENIX) || defined(JAGSRV) || \
+    defined(ORICMC) || defined(SINCQL)
 #define T_RAWBIN_C
 #include "vlink.h"
 
@@ -35,6 +34,10 @@ enum {
   HDR_DRAGONBIN,
   HDR_JAGSRV,
   HDR_ORICMC,
+  HDR_PGXC02,
+  HDR_PGX816,
+  HDR_PGZ24,
+  HDR_PGZ32,
   HDR_QDOS,
   HDR_XTCC
 };
@@ -53,12 +56,11 @@ static int rawbin_targetlink(struct GlobalVars *,struct LinkedSection *,
                               struct Section *);
 static void rawbin_writeobject(struct GlobalVars *,FILE *);
 static void rawbin_writeshared(struct GlobalVars *,FILE *);
-static void rawbin_writeexec(struct GlobalVars *,FILE *,bool,int);
-#ifdef RAWBIN1
-static void rawbin_writesingle(struct GlobalVars *,FILE *);
-#endif
-#ifdef RAWBIN2
-static void rawbin_writemultiple(struct GlobalVars *,FILE *);
+static void rawbin_out(struct GlobalVars *,FILE *,int);
+#ifdef RAWBIN
+static int rawbin_options(struct GlobalVars *,int,const char **,int *);
+static void rawbin_printhelp(void);
+static void rawbin_write(struct GlobalVars *,FILE *);
 #endif
 #ifdef AMSDOS
 static unsigned long amsdos_headersize(struct GlobalVars *);
@@ -75,12 +77,12 @@ static void ataricom_write(struct GlobalVars *,FILE *);
 #ifdef BBC
 static void bbc_write(struct GlobalVars *,FILE *);
 static void bbc_write2(struct GlobalVars *,FILE *);
+static FILE *bbcload;
 #endif
 #ifdef CBMPRG
 static unsigned long cbmprg_headersize(struct GlobalVars *);
 static void cbmprg_write(struct GlobalVars *,FILE *);
 static void cbmreu_write(struct GlobalVars *,FILE *);
-static FILE *bbcload;
 #endif
 #ifdef COCOML
 static unsigned long cocoml_headersize(struct GlobalVars *);
@@ -90,6 +92,14 @@ static void cocoml_write(struct GlobalVars *,FILE *);
 static unsigned long dragonbin_headersize(struct GlobalVars *);
 static void dragonbin_write(struct GlobalVars *,FILE *);
 #endif
+#ifdef FOENIX
+static unsigned long pgx_headersize(struct GlobalVars *);
+static void pgxc02_write(struct GlobalVars *,FILE *);
+static void pgx816_write(struct GlobalVars *,FILE *);
+static unsigned long pgz_headersize(struct GlobalVars *);
+static void pgz24_write(struct GlobalVars *,FILE *);
+static void pgz32_write(struct GlobalVars *,FILE *);
+#endif
 #ifdef JAGSRV
 #define TOSHDR_SIZE 28
 #define JAGR_SIZE 18
@@ -98,11 +108,13 @@ static void jagsrv_write(struct GlobalVars *,FILE *);
 #endif
 #ifdef ORICMC
 static int oric_options(struct GlobalVars *,int,const char **,int *);
+static void oric_printhelp(void);
 static unsigned long oric_headersize(struct GlobalVars *);
 static void oric_write(struct GlobalVars *,FILE *);
 #endif
 #ifdef SINCQL
 static int sincql_options(struct GlobalVars *,int,const char **,int *);
+static void sincql_printhelp(void);
 static unsigned long sincql_headersize(struct GlobalVars *);
 static void sincql_write(struct GlobalVars *,FILE *);
 #endif
@@ -128,7 +140,10 @@ static long hdroffs;
 static lword relocsize;
 static struct LinkedSection *hdrsect;
 
-static int autoexec;        /* used by oricmc */
+static bool multifile;      /* used by rawbin */
+static bool coalesced;      /* used by rawbin */
+static lword fillval;       /* used by rawbin */
+static bool autoexec;       /* used by oricmc */
 static lword stacksize;     /* used by sinclairql */
 static lword udatasize;     /* used by sinclairql */
 
@@ -142,13 +157,14 @@ static const char defaultscript[] =
   "}\n";
 
 
-#ifdef RAWBIN1
-struct FFFuncs fff_rawbin1 = {
-  "rawbin1",
+#ifdef RAWBIN
+struct FFFuncs fff_rawbin = {
+  "rawbin",
   defaultscript,
   NULL,
   NULL,
-  NULL,
+  rawbin_options,
+  rawbin_printhelp,
   rawbin_headersize,
   rawbin_identify,
   rawbin_readconv,
@@ -160,7 +176,7 @@ struct FFFuncs fff_rawbin1 = {
   NULL,NULL,NULL,
   rawbin_writeobject,
   rawbin_writeshared,
-  rawbin_writesingle,
+  rawbin_write,
   NULL,NULL,
   0,
   0x8000,
@@ -170,39 +186,7 @@ struct FFFuncs fff_rawbin1 = {
   -1, /* endianness undefined, only write */
   0,  /* addr_bits from input */
   0,  /* ptr-alignment unknown */
-  FFF_SECTOUT|FFF_KEEPRELOCS
-};
-#endif
-
-#ifdef RAWBIN2
-struct FFFuncs fff_rawbin2 = {
-  "rawbin2",
-  defaultscript,
-  NULL,
-  NULL,
-  NULL,
-  rawbin_headersize,
-  rawbin_identify,
-  rawbin_readconv,
-  NULL,
-  rawbin_targetlink,
-  NULL,
-  NULL,
-  NULL,
-  NULL,NULL,NULL,
-  rawbin_writeobject,
-  rawbin_writeshared,
-  rawbin_writemultiple,
-  NULL,NULL,
-  0,
-  0x8000,
-  0,
-  0,
-  RTAB_UNDEF,0,
-  -1, /* endianness undefined, only write */
-  0,  /* addr_bits from input */
-  0,  /* ptr-alignment unknown */
-  FFF_SECTOUT|FFF_KEEPRELOCS
+  FFF_SECTOUT|FFF_KEEPRELOCS|FFF_OUTWORDADDR
 };
 #endif
 
@@ -226,6 +210,7 @@ static const char amsdosscript[] =
 struct FFFuncs fff_amsdos = {
   "amsdos",
   amsdosscript,
+  NULL,
   NULL,
   NULL,
   NULL,
@@ -260,6 +245,7 @@ struct FFFuncs fff_applebin = {
   NULL,
   NULL,
   NULL,
+  NULL,
   applebin_headersize,
   rawbin_identify,
   rawbin_readconv,
@@ -288,6 +274,7 @@ struct FFFuncs fff_applebin = {
 struct FFFuncs fff_ataricom = {
   "ataricom",
   defaultscript,
+  NULL,
   NULL,
   NULL,
   NULL,
@@ -322,6 +309,7 @@ struct FFFuncs fff_bbc = {
   NULL,
   NULL,
   NULL,
+  NULL,
   rawbin_headersize,
   rawbin_identify,
   rawbin_readconv,
@@ -347,6 +335,7 @@ struct FFFuncs fff_bbc = {
 struct FFFuncs fff_bbc2 = {
   "bbc2",
   defaultscript,
+  NULL,
   NULL,
   NULL,
   NULL,
@@ -381,6 +370,7 @@ struct FFFuncs fff_cbmprg = {
   NULL,
   NULL,
   NULL,
+  NULL,
   cbmprg_headersize,
   rawbin_identify,
   rawbin_readconv,
@@ -406,6 +396,7 @@ struct FFFuncs fff_cbmprg = {
 struct FFFuncs fff_cbmreu = {
   "cbmreu",
   defaultscript,
+  NULL,
   NULL,
   NULL,
   NULL,
@@ -440,6 +431,7 @@ struct FFFuncs fff_cocoml = {
   NULL,
   NULL,
   NULL,
+  NULL,
   cocoml_headersize,
   rawbin_identify,
   rawbin_readconv,
@@ -471,6 +463,7 @@ struct FFFuncs fff_dragonbin = {
   NULL,
   NULL,
   NULL,
+  NULL,
   dragonbin_headersize,
   rawbin_identify,
   rawbin_readconv,
@@ -491,6 +484,126 @@ struct FFFuncs fff_dragonbin = {
   RTAB_UNDEF,0,
   _BIG_ENDIAN_,
   16,0,
+  FFF_SECTOUT
+};
+#endif
+
+#ifdef FOENIX
+struct FFFuncs fff_pgxc02 = {
+  "foenixpgx-c02",
+  defaultscript,
+  NULL,
+  NULL,
+  NULL,
+  NULL,
+  pgx_headersize,
+  rawbin_identify,
+  rawbin_readconv,
+  NULL,
+  rawbin_targetlink,
+  NULL,
+  NULL,
+  NULL,
+  NULL,NULL,NULL,
+  rawbin_writeobject,
+  rawbin_writeshared,
+  pgxc02_write,
+  NULL,NULL,
+  0,
+  0,
+  0,
+  0,
+  RTAB_UNDEF,0,
+  _LITTLE_ENDIAN_,
+  16,0,
+  FFF_SECTOUT
+};
+
+struct FFFuncs fff_pgx816 = {
+  "foenixpgx-816",
+  defaultscript,
+  NULL,
+  NULL,
+  NULL,
+  NULL,
+  pgx_headersize,
+  rawbin_identify,
+  rawbin_readconv,
+  NULL,
+  rawbin_targetlink,
+  NULL,
+  NULL,
+  NULL,
+  NULL,NULL,NULL,
+  rawbin_writeobject,
+  rawbin_writeshared,
+  pgx816_write,
+  NULL,NULL,
+  0,
+  0,
+  0,
+  0,
+  RTAB_UNDEF,0,
+  _LITTLE_ENDIAN_,
+  24,0,
+  FFF_SECTOUT
+};
+
+struct FFFuncs fff_pgz24 = {
+  "foenixpgz-24",
+  defaultscript,
+  NULL,
+  NULL,
+  NULL,
+  NULL,
+  pgz_headersize,
+  rawbin_identify,
+  rawbin_readconv,
+  NULL,
+  rawbin_targetlink,
+  NULL,
+  NULL,
+  NULL,
+  NULL,NULL,NULL,
+  rawbin_writeobject,
+  rawbin_writeshared,
+  pgz24_write,
+  NULL,NULL,
+  0,
+  0,
+  0,
+  0,
+  RTAB_UNDEF,0,
+  -1,0,0, /* undefined, only write */
+  FFF_SECTOUT
+};
+
+struct FFFuncs fff_pgz32 = {
+  "foenixpgz-32",
+  defaultscript,
+  NULL,
+  NULL,
+  NULL,
+  NULL,
+  pgz_headersize,
+  rawbin_identify,
+  rawbin_readconv,
+  NULL,
+  rawbin_targetlink,
+  NULL,
+  NULL,
+  NULL,
+  NULL,NULL,NULL,
+  rawbin_writeobject,
+  rawbin_writeshared,
+  pgz32_write,
+  NULL,NULL,
+  0,
+  0,
+  0,
+  0,
+  RTAB_UNDEF,0,
+  -1,0,0, /* undefined, only write */
   FFF_SECTOUT
 };
 #endif
@@ -518,6 +631,7 @@ static const char jaguarscript[] =
 struct FFFuncs fff_jagsrv = {
   "jagsrv",
   jaguarscript,
+  NULL,
   NULL,
   NULL,
   NULL,
@@ -552,6 +666,7 @@ struct FFFuncs fff_oricmc = {
   NULL,
   NULL,
   oric_options,
+  oric_printhelp,
   oric_headersize,
   rawbin_identify,
   rawbin_readconv,
@@ -583,6 +698,7 @@ struct FFFuncs fff_sincql = {
   NULL,
   NULL,
   sincql_options,
+  sincql_printhelp,
   sincql_headersize,
   rawbin_identify,
   rawbin_readconv,
@@ -610,6 +726,7 @@ struct FFFuncs fff_sincql = {
 struct FFFuncs fff_srec19 = {
   "srec19",
   defaultscript,
+  NULL,
   NULL,
   NULL,
   NULL,
@@ -645,6 +762,7 @@ struct FFFuncs fff_srec28 = {
   NULL,
   NULL,
   NULL,
+  NULL,
   rawbin_headersize,
   rawbin_identify,
   rawbin_readconv,
@@ -674,6 +792,7 @@ struct FFFuncs fff_srec28 = {
 struct FFFuncs fff_srec37 = {
   "srec37",
   defaultscript,
+  NULL,
   NULL,
   NULL,
   NULL,
@@ -709,6 +828,7 @@ struct FFFuncs fff_ihex = {
   NULL,
   NULL,
   NULL,
+  NULL,
   rawbin_headersize,
   rawbin_identify,
   rawbin_readconv,
@@ -730,7 +850,7 @@ struct FFFuncs fff_ihex = {
   -1, /* endianness undefined, only write */
   0,  /* addr_bits from input */
   0,  /* ptr-alignment unknown */
-  FFF_NOFILE
+  FFF_NOFILE|FFF_OUTWORDADDR
 };
 #endif
 
@@ -738,6 +858,7 @@ struct FFFuncs fff_ihex = {
 struct FFFuncs fff_shex1 = {
   "oilhex",
   defaultscript,
+  NULL,
   NULL,
   NULL,
   NULL,
@@ -767,6 +888,31 @@ struct FFFuncs fff_shex1 = {
 #endif
 
 
+#ifdef RAWBIN
+static int rawbin_options(struct GlobalVars *gv,
+                          int argc,const char **argv,int *i)
+{
+  if (!strcmp(argv[*i],"-coalesced"))
+    coalesced = TRUE;
+  else if (!strcmp(argv[*i],"-multifile"))
+    multifile = TRUE;
+  else if (!strncmp(argv[*i],"-fill=",6)) {
+    long long val;
+    sscanf(&argv[*i][6],"%lli",&val);
+    fillval = val;
+  }
+  else
+    return 0;
+  return 1;
+}
+
+static void rawbin_printhelp(void)
+{
+  printf("-coalesced        output all memory segments without gaps\n"
+         "-multifile        start a new file for a gap between memory segments\n");
+}
+#endif
+
 #ifdef ORICMC
 static int oric_options(struct GlobalVars *gv,
                         int argc,const char **argv,int *i)
@@ -776,6 +922,11 @@ static int oric_options(struct GlobalVars *gv,
   else
     return 0;
   return 1;
+}
+
+static void oric_printhelp(void)
+{
+  printf("-autox            set auto-execute flag in the header\n");
 }
 #endif
 
@@ -798,6 +949,13 @@ static int sincql_options(struct GlobalVars *gv,
   else
     return 0;
   return 1;
+}
+
+static void sincql_printhelp(void)
+{
+  printf("-qhdr             prepend QDOS file header (default)\n"
+         "-xtcc             append XTcc style trailer\n"
+         "-stack=<val>      set stack size, which defaults to 4096\n");
 }
 #endif
 
@@ -849,10 +1007,28 @@ static unsigned long dragonbin_headersize(struct GlobalVars *gv)
 }
 #endif
 
+#ifdef FOENIX
+static unsigned long pgx_headersize(struct GlobalVars *gv)
+{
+  return 8;
+}
+
+static unsigned long pgz_headersize(struct GlobalVars *gv)
+{
+  return 1;  /* followed by 6 or 8 bytes segment header */
+}
+#endif
+
 #ifdef ORICMC
 static unsigned long oric_headersize(struct GlobalVars *gv)
 {
-  return 14+strlen(gv->dest_name)+1;
+  unsigned long len = strlen(gv->dest_name);
+
+  if (len>4 && !stricmp(gv->dest_name+len-4,".tap"))
+    len -= 4;
+  if (len > 15)
+    len = 15;
+  return 15+len;
 }
 #endif
 
@@ -918,7 +1094,7 @@ static FILE *open_ascfile(struct GlobalVars *gv)
     error(29,gv->dest_name);  /* Can't create output file */
     return NULL;
   }
-  untrim_sections(gv);  /* always output trailing 0-bytes in ASCII hex-files */
+  untrim_sections(gv,1); /* always output trailing 0-bytes in ASCII hex-files */
   return f;
 }
 
@@ -930,7 +1106,7 @@ static void savehdroffs(struct GlobalVars *gv,FILE *f,
   hdrsect = ls;
   hdrfile = f;
   hdroffs = ftell(f);
-  fwritegap(gv,f,bytes);
+  fwritegap(gv,f,bytes,0);
 }
 
 
@@ -948,6 +1124,14 @@ static void even_padding(FILE *f)
 {
   if (ftell(f) & 1)
     fwrite8(f,0);  /* make file size even */
+}
+
+
+static void trace_baseaddr(struct GlobalVars *gv,struct LinkedSection *ls)
+{
+  if (gv->trace_file)
+    fprintf(gv->trace_file,"Base address = 0x%08llx.\n",
+            (unsigned long long)ls->copybase);  /* @@@ FIXME! */
 }
 
 
@@ -1013,6 +1197,20 @@ static int rawbin_segheader(struct GlobalVars *gv,FILE *f,
     return 1;
   }
 #endif
+#ifdef FOENIX
+  if (header == HDR_PGZ24) {  /* 24-bit LE load-address and size */
+    fwrite16le(f,ls->copybase&0xffff);
+    fwrite8(f,(ls->copybase>>16)&0xff);
+    fwrite16le(f,ls->size&0xffff);
+    fwrite8(f,(ls->size>>16)&0xff);
+    return 1;
+  }
+  if (header == HDR_PGZ32) {  /* 32-bit LE load-address and size */
+    fwrite32le(f,ls->copybase);
+    fwrite32le(f,ls->size);
+    return 1;
+  }
+#endif
   return 0;
 }
 
@@ -1067,17 +1265,35 @@ static void rawbin_fileheader(struct GlobalVars *gv,FILE *f,
     fwrite8(f,0xaa);
   }
 #endif
+#ifdef FOENIX
+  if (header==HDR_PGXC02 || header==HDR_PGX816) {  /* single seg. header */
+    static uint8_t hdr[4] = { 'P','G','X' };
+    hdr[3] = header==HDR_PGX816 ? 1 : 3;
+    fwritex(f,hdr,sizeof(hdr));
+    fwrite32le(f,ls->copybase);
+  }
+  if (header == HDR_PGZ24) {  /* 24-bit Foenix multi segment header */
+    fwrite8(f,'Z');
+  }
+  if (header == HDR_PGZ32) {  /* 32-bit Foenix multi segment header */
+    fwrite8(f,'z');
+  }
+#endif
 #ifdef ORICMC
   if (header == HDR_ORICMC) {  /* Oric machine code file header */
     static const uint8_t hdr[] = {
-      0x16,0x16,0x16,0x16,0x24,0,0x80
+      0x16,0x16,0x16,0x16,0x24,0,0,0x80
     };
+    int i;
     fwritex(f,hdr,sizeof(hdr));
     fwrite8(f,autoexec?0xc7:0);
     savehdroffs(gv,f,2,ls);    /* insert last address later */
     fwrite16be(f,ls->copybase);
     fwrite8(f,0);
-    fwritex(f,gv->dest_name,strlen(gv->dest_name)+1);
+    for (i=0; i<15 && gv->dest_name[i] && stricmp(&gv->dest_name[i],".tap");
+         i++)
+      fwrite8(f,toupper((unsigned char)gv->dest_name[i]));
+    fwrite8(f,0);
   }
 #endif
 #ifdef JAGSRV
@@ -1122,6 +1338,18 @@ static void rawbin_trailer(struct GlobalVars *gv,FILE *f,
   if (header == HDR_DRAGONBIN && rewindtohdr(f))
     fwrite16be(f,ls->copybase+ls->size-hdrsect->copybase);
 #endif
+#ifdef FOENIX
+  if (header == HDR_PGZ24) {
+    fwrite16le(f,execaddr&0xffff);
+    fwrite8(f,(execaddr>>16)&0xff);
+    fwrite16le(f,0);  /* no more segments */
+    fwrite8(f,0);
+  }
+  if (header == HDR_PGZ32) {
+    fwrite32le(f,execaddr);
+    fwrite32le(f,0);  /* no more segments */
+  }
+#endif
 #ifdef ORICMC
   if (header == HDR_ORICMC && rewindtohdr(f))
     fwrite16be(f,ls->copybase+ls->size-1);
@@ -1130,6 +1358,11 @@ static void rawbin_trailer(struct GlobalVars *gv,FILE *f,
   if (header == HDR_XTCC) {
     even_padding(f);  /* align to even address */
     fwrite32be(f,0x58546363);  /* XTcc ID */
+  }
+  else if (header == HDR_QDOS) {
+    /* even with QDOS header, the file size must be even, and the
+       packed reloc table size is not guaranteed to be even */
+    even_padding(f);  /* align to even address */
   }
   if (header==HDR_XTCC || (header == HDR_QDOS && rewindtohdr(f))) {
     fwrite32be(f,(uint32_t)(relocsize+64>udatasize+stacksize?
@@ -1145,15 +1378,14 @@ static void rawbin_trailer(struct GlobalVars *gv,FILE *f,
 }
 
 
-static void rawbin_writeexec(struct GlobalVars *gv,FILE *f,bool singlefile,
-                             int header)
+static void rawbin_out(struct GlobalVars *gv,FILE *f,int header)
 /* creates executable raw-binary files (with absolute addresses) */
 {
-  const char *fn = "rawbin_writeexec(): ";
+  const char *fn = "rawbin_out(): ";
   bool dorelocs = gv->keep_relocs && (fff[gv->dest_format]->flags & FFF_KEEPRELOCS);
   FILE *firstfile = f;
   bool firstsec = TRUE;
-  unsigned long addr,baseaddr;
+  lword addr,baseaddr;
   struct LinkedSection *ls,*prevls;
   struct BinReloc *brp,*brlist=NULL;
   size_t brcnt = 0;
@@ -1171,8 +1403,8 @@ static void rawbin_writeexec(struct GlobalVars *gv,FILE *f,bool singlefile,
       if (ls->size != 0) {
         /* make a new file for each output section */
         if (gv->trace_file)
-          fprintf(gv->trace_file,"Base address section %s = 0x%08lx.\n",
-                  ls->name,ls->copybase);
+          fprintf(gv->trace_file,"Base address section %s = 0x%08llx.\n",
+                  ls->name,(unsigned long long)ls->copybase);  /* @@@ FIXME */
         if (f != NULL)
           ierror("%sopen file with output_sections",fn);
         if (gv->osec_base_name != NULL) {
@@ -1194,27 +1426,28 @@ static void rawbin_writeexec(struct GlobalVars *gv,FILE *f,bool singlefile,
     else if (firstsec) {
       /* write an optional header before the first section */
       baseaddr = ls->copybase;
-      if (gv->trace_file)
-        fprintf(gv->trace_file,"Base address = 0x%08lx.\n",ls->copybase);
+      trace_baseaddr(gv,ls);
       firstsec = FALSE;
       rawbin_fileheader(gv,f,ls,header);
     }
     else {
       /* handle gaps between this and the previous section */
       if (ls->copybase > addr) {
-        if (ls->copybase-addr < MAXGAP || singlefile) {
-          if (!rawbin_segheader(gv,f,ls,header))
-            fwritegap(gv,f,ls->copybase-addr);
+        if (ls->copybase-addr < MAXGAP || !multifile) {
+          if (!rawbin_segheader(gv,f,ls,header) && !coalesced)
+            fwritegap(gv,f,ls->copybase-addr,fillval);
         }
         else {  /* open a new file for this section */
           if (f != firstfile)
             fclose(f);
           name = alloc(strlen(gv->dest_name)+strlen(ls->name)+2);
-	  if(header == HDR_BBC){
-	    sprintf(name,"%s%s",gv->dest_name,ls->name);
-	    if(bbcload)
-	      fprintf(bbcload,"*srload %s%s 8000 %s\r",gv->dest_name,ls->name,ls->name+1);
-	  }else
+#ifdef BBC
+          if(header == HDR_BBC){
+            sprintf(name,"%s%s",gv->dest_name,ls->name);
+            if(bbcload)
+              fprintf(bbcload,"*srload %s%s 8000 %s\r",gv->dest_name,ls->name,ls->name+1);
+          }else
+#endif
 	    sprintf(name,"%s.%s",gv->dest_name,ls->name);
           if (!(f = fopen(name,"wb"))) {
             error(29,name);
@@ -1316,7 +1549,7 @@ static void rawbin_writeexec(struct GlobalVars *gv,FILE *f,bool singlefile,
         if (diff < 0) {
           ierror("%snegative reloc offset diff %ld\n",fn,(long)diff);
         }
-        else if (diff > limit) {
+        else if (diff==0 || diff>limit) {
           fwritetbyte(gv,f,0);    /* 0 indicates an address-size difference */
           fwritetaddr(gv,f,diff); /* ...in the next word */
           relocsize += gv->tbytes_per_taddr;
@@ -1354,22 +1587,13 @@ static void rawbin_writeobject(struct GlobalVars *gv,FILE *f)
 }
 
 
-#ifdef RAWBIN1
-static void rawbin_writesingle(struct GlobalVars *gv,FILE *f)
-/* creates a single raw-binary file, fill gaps between */
-/* sections with zero */
+#ifdef RAWBIN
+static void rawbin_write(struct GlobalVars *gv,FILE *f)
+/* creates a raw-binary file, where memory segments are either written to
+   multiple files, coalesced to the previous segment or written with a gap
+   filled by zero-bytes */
 {
-  rawbin_writeexec(gv,f,TRUE,HDR_NONE);
-}
-#endif
-
-
-#ifdef RAWBIN2
-static void rawbin_writemultiple(struct GlobalVars *gv,FILE *f)
-/* creates raw-binary which might get split over several */
-/* files, because of different section base addresses */
-{
-  rawbin_writeexec(gv,f,FALSE,HDR_NONE);
+  rawbin_out(gv,f,HDR_NONE);
 }
 #endif
 
@@ -1379,7 +1603,8 @@ static void amsdos_write(struct GlobalVars *gv,FILE *f)
 /* creates one or more raw-binary files with an AMSDOS header, suitable */
 /* for loading as an executable on Amstrad/Scheider CPC computers */
 {
-  rawbin_writeexec(gv,f,FALSE,HDR_AMSDOS);
+  multifile = TRUE;
+  rawbin_out(gv,f,HDR_AMSDOS);
 }
 #endif
 
@@ -1389,7 +1614,7 @@ static void applebin_write(struct GlobalVars *gv,FILE *f)
 /* creates a raw-binary file with an Apple DOS binary header, suitable */
 /* for loading as an executable on Apple II computers */
 {
-  rawbin_writeexec(gv,f,TRUE,HDR_APPLEBIN);
+  rawbin_out(gv,f,HDR_APPLEBIN);
 }
 #endif
 
@@ -1399,7 +1624,7 @@ static void ataricom_write(struct GlobalVars *gv,FILE *f)
 /* creates a raw-binary file with an ATARI COM file header, suitable */
 /* for loading as an executable on Atari 8-bit computers */
 {
-  rawbin_writeexec(gv,f,TRUE,HDR_ATARICOM);
+  rawbin_out(gv,f,HDR_ATARICOM);
 }
 #endif
 
@@ -1409,14 +1634,15 @@ static void cbmprg_write(struct GlobalVars *gv,FILE *f)
 /* creates a raw-binary file with a Commodore header, suitable */
 /* for loading as an executable on PET, VIC-20, 64, etc. computers */
 {
-  rawbin_writeexec(gv,f,TRUE,HDR_CBMPRG);
+  rawbin_out(gv,f,HDR_CBMPRG);
 }
 
 static void cbmreu_write(struct GlobalVars *gv,FILE *f)
 /* creates a raw-binary file with a Commodore header, followed by */
 /* a REU image. */
 {
-  rawbin_writeexec(gv,f,FALSE,HDR_CBMPRG);
+  multifile = TRUE;
+  rawbin_out(gv,f,HDR_CBMPRG);
 }
 #endif
 
@@ -1426,7 +1652,7 @@ static void cocoml_write(struct GlobalVars *gv,FILE *f)
 /* creates a raw-binary file with CoCo segment headers and trailer, suitable */
 /* for loading as a machine language file on Tandy Color Computer 1,2,3 */
 {
-  rawbin_writeexec(gv,f,TRUE,HDR_COCOML);
+  rawbin_out(gv,f,HDR_COCOML);
 }
 #endif
 
@@ -1436,7 +1662,42 @@ static void dragonbin_write(struct GlobalVars *gv,FILE *f)
 {
 /* creates a raw-binary file with a Dragon DOS file header, suitable */
 /* for loading as an executable on Dragon 32 and 64 computers */
-  rawbin_writeexec(gv,f,TRUE,HDR_DRAGONBIN);
+  rawbin_out(gv,f,HDR_DRAGONBIN);
+}
+#endif
+
+
+#ifdef FOENIX
+static void pgxc02_write(struct GlobalVars *gv,FILE *f)
+{
+/* creates a raw-binary file with a PGX single-segment file header, */
+/* suitable for loading as an executable on the 65C02-based */
+/* C256 Foenix computers */
+  rawbin_out(gv,f,HDR_PGXC02);
+}
+
+static void pgx816_write(struct GlobalVars *gv,FILE *f)
+{
+/* creates a raw-binary file with a PGX single-segment file header, */
+/* suitable for loading as an executable on the 65816-based */
+/* C256 Foenix computers */
+  rawbin_out(gv,f,HDR_PGX816);
+}
+
+static void pgz24_write(struct GlobalVars *gv,FILE *f)
+{
+/* creates a raw-binary file with a PGZ file header and multiple segment */
+/* headers, suitable for loading as an executable on a 16- or 24-bit */
+/* Foenix platform */
+  rawbin_out(gv,f,HDR_PGZ24);
+}
+
+static void pgz32_write(struct GlobalVars *gv,FILE *f)
+{
+/* creates a raw-binary file with a PGZ file header and multiple segment */
+/* headers, suitable for loading as an executable on a 32-bit */
+/* Foenix platform */
+  rawbin_out(gv,f,HDR_PGZ32);
 }
 #endif
 
@@ -1446,7 +1707,7 @@ static void oric_write(struct GlobalVars *gv,FILE *f)
 {
 /* creates a raw-binary file with an Oric machine code file header, */
 /* suitable for loading as an executable on Oric-1/Atmos/Telestrat computers */
-  rawbin_writeexec(gv,f,TRUE,HDR_ORICMC);
+  rawbin_out(gv,f,HDR_ORICMC);
 }
 #endif
 
@@ -1457,7 +1718,7 @@ static void jagsrv_write(struct GlobalVars *gv,FILE *f)
 /* for loading and executing on a SkunkBoard equipped Atari Jaguar, or */
 /* a VirtualJaguar emulator */
 {
-  rawbin_writeexec(gv,f,TRUE,HDR_JAGSRV);
+  rawbin_out(gv,f,HDR_JAGSRV);
 }
 #endif
 
@@ -1465,15 +1726,17 @@ static void jagsrv_write(struct GlobalVars *gv,FILE *f)
 static void bbc_write(struct GlobalVars *gv,FILE *f)
 /* creates a single raw-binary file plus a bbc info file */
 {
-  rawbin_writeexec(gv,f,TRUE,HDR_BBC);
+  rawbin_out(gv,f,HDR_BBC);
 }
+
 static void bbc_write2(struct GlobalVars *gv,FILE *f)
 /* creates a single raw-binary file plus a bbc info file */
 {
   char *name = alloc(strlen(gv->dest_name)+8);
   sprintf(name,"load%s",gv->dest_name);
   bbcload = fopen(name,"w");
-  rawbin_writeexec(gv,f,FALSE,HDR_BBC);
+  multifile = TRUE;
+  rawbin_out(gv,f,HDR_BBC);
   free(name);
 }
 #endif
@@ -1498,7 +1761,7 @@ static void sincql_write(struct GlobalVars *gv,FILE *f)
     stacksize = 4096;  /* default */
   if ((udatasize + stacksize) & 1)
     ++udatasize;  /* make sure bss-segment has an even number of bytes */
-  rawbin_writeexec(gv,f,TRUE,sincqlhdr);
+  rawbin_out(gv,f,sincqlhdr);
 }
 #endif
 
@@ -1540,8 +1803,7 @@ static void srec_write(struct GlobalVars *gv,FILE *f,int addrsize)
       continue;  /* ignore empty sections */
 
     if (firstsec) {
-      if (gv->trace_file)
-        fprintf(gv->trace_file,"Base address = 0x%08lx.\n",ls->copybase);
+      trace_baseaddr(gv,ls);
       firstsec = FALSE;
     }
 
@@ -1617,7 +1879,8 @@ static void srec37_write(struct GlobalVars *gv,FILE *f)
 
 
 #ifdef IHEX
-static void IHexOut(FILE *f,unsigned long addr,uint8_t *buf,int len)
+static void IHexOut(FILE *f,int out_le,unsigned long addr,uint8_t *buf,
+                    int len,size_t opb)
 {
   static unsigned long hiaddr;
   uint8_t chksum;
@@ -1630,11 +1893,29 @@ static void IHexOut(FILE *f,unsigned long addr,uint8_t *buf,int len)
             (unsigned)(-(2+4+(hiaddr>>8)+hiaddr))&0xff);
   }
   fprintf(f,":%02X%02X%02X00",
-          (unsigned)len&0xff,(unsigned)(addr>>8)&0xff,(unsigned)addr&0xff);
-  chksum = len + (addr>>8) + addr;
+          (unsigned)(len*opb)&0xff,
+          (unsigned)(addr>>8)&0xff,
+          (unsigned)addr&0xff);
+  chksum = len*opb + (addr>>8) + addr;
   for (; len>0; len--) {
-    fprintf(f,"%02X",((unsigned)*buf)&0xff);
-    chksum += *buf++;
+    uint8_t b;
+    int i;
+
+    if (out_le) {
+      for (i=opb-1; i>=0; i--) {
+        b = buf[i];
+        fprintf(f,"%02X",(unsigned)b);
+        chksum += b;
+      }
+    }
+    else {
+      for (i=0; i<opb; i++) {
+        b = buf[i];
+        fprintf(f,"%02X",(unsigned)b);
+        chksum += b;
+      }
+    }
+    buf += opb;
   }
   fprintf(f,"%02X\n",(-chksum)&0xff);
 }
@@ -1642,9 +1923,10 @@ static void IHexOut(FILE *f,unsigned long addr,uint8_t *buf,int len)
 
 static void ihex_write(struct GlobalVars *gv,FILE *f)
 {
+  size_t opb = gv->octets_per_tbyte;
   bool firstsec = TRUE;
   struct LinkedSection *ls;
-  unsigned long len,addr;
+  unsigned long addr,len;
   uint8_t *p;
 
   /* open ASCII output file */
@@ -1656,22 +1938,24 @@ static void ihex_write(struct GlobalVars *gv,FILE *f)
       continue;  /* ignore empty sections */
 
     if (firstsec) {
-      if (gv->trace_file)
-        fprintf(gv->trace_file,"Base address = 0x%08lx.\n",ls->copybase);
+      trace_baseaddr(gv,ls);
       firstsec = FALSE;
     }
 
     /* resolve all relocations and write section contents */
     calc_relocs(gv,ls);
 
-    for (p=ls->data,addr=ls->copybase,len=ls->filesize; len>0; ) {
-      int nbytes = (len>MAXIREC) ? MAXIREC : len;
+    p = ls->data;
+    addr = ls->copybase * opb;  /* yes, that's probably how it is done */
+    len = ls->filesize;
+    while (len > 0) {
+      int nbytes = len > MAXIREC/opb ? MAXIREC/opb : len;
 
-      if ((((unsigned long)addr)&0xffff)+nbytes > 0xffff)
-        nbytes = 0x10000 - (((unsigned long)addr) & 0xffff);
-      IHexOut(f,addr,p,nbytes);
-      p += nbytes;
-      addr += nbytes;
+      if ((((unsigned long)addr)&0xffff) + nbytes*opb > 0xffff)
+        nbytes = (0x10000 - (((unsigned long)addr) & 0xffff)) / opb;
+      IHexOut(f,gv->output_le,addr,p,nbytes,opb);
+      p += nbytes * opb;
+      addr += nbytes * opb;
       len -= nbytes;
     }
   }
@@ -1716,8 +2000,7 @@ static void shex1_write(struct GlobalVars *gv,FILE *f)
       continue;  /* ignore empty sections */
 
     if (firstsec) {
-      if (gv->trace_file)
-        fprintf(gv->trace_file,"Base address = 0x%08lx.\n",ls->copybase);
+      trace_baseaddr(gv,ls);
       firstsec = FALSE;
     }
 

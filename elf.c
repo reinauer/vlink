@@ -1,8 +1,8 @@
-/* $VER: vlink elf.c V0.15e (23.03.17)
+/* $VER: vlink elf.c V0.18 (23.12.24)
  *
  * This file is part of vlink, a portable linker for multiple
  * object formats.
- * Copyright (c) 1997-2017  Frank Wille
+ * Copyright (c) 1997-2024  Frank Wille
  */
 
 
@@ -1056,8 +1056,8 @@ uint32_t elf_segmentcheck(struct GlobalVars *gv,size_t ehdrsize)
   unsigned long foffs;
   uint32_t segcnt;
 
-  /* @@@ ELF executables cannot deal with trimmed sections??? */
-  untrim_sections(gv);
+  /* @@@ ELF executables cannot deal with trimmed sections??? FIXMEEEE */
+  untrim_sections(gv,0);  /* do not trim bss/uninitialized at least */
 
   /* find PHDR segment */
   for (phdrs=NULL,p=gv->phdrlist; p; p=p->next) {
@@ -1099,8 +1099,8 @@ uint32_t elf_segmentcheck(struct GlobalVars *gv,size_t ehdrsize)
            ls->n.next!=NULL;
            ls=(struct LinkedSection *)ls->n.next) {
 
-        if (ls->copybase>=(unsigned long)p->start && ls->size &&
-            (ls->copybase+ls->size)<=(unsigned long)p->mem_end &&
+        if (ls->copybase>=p->start && ls->size &&
+            (ls->copybase+ls->size)<=p->mem_end &&
             (ls->flags & SF_ALLOC)) {
 
           p->flags |= conv_perm_to_elf(ls->protection);
@@ -1137,10 +1137,10 @@ uint32_t elf_segmentcheck(struct GlobalVars *gv,size_t ehdrsize)
             }
             else if (ls->copybase > 0) {
               ierror("elf_segmentcheck(): overlapping sections "
-                     "%s(%lx-%lx) followed by %s(%lx)",
-                     seg_lastsec->name,seg_lastsec->copybase,
-                     seg_lastsec->copybase + seg_lastsec->filesize,
-                     ls->copybase);
+                     "%s(%llx-%llx) followed by %s(%lx)",
+                     seg_lastsec->name,(unsigned long long)seg_lastsec->copybase,
+                     (unsigned long long)seg_lastsec->copybase + seg_lastsec->filesize,
+                     (unsigned long long)ls->copybase);
             }
           }
           seg_lastsec = ls;
@@ -1184,8 +1184,8 @@ uint32_t elf_segmentcheck(struct GlobalVars *gv,size_t ehdrsize)
         p->flags &= ~PHDR_PFMASK;
         for (ls=seg_lastdat=(struct LinkedSection *)gv->lnksec.first;
              ls->n.next!=NULL; ls=(struct LinkedSection *)ls->n.next) {
-          if (ls->copybase>=(unsigned long)p->start && ls->size &&
-              (ls->copybase+ls->size)<=(unsigned long)p->mem_end &&
+          if (ls->copybase>=p->start && ls->size &&
+              (ls->copybase+ls->size)<=p->mem_end &&
               (ls->flags & SF_ALLOC)) {
             p->flags |= conv_perm_to_elf(ls->protection);
             seg_lastdat = ls;
@@ -1234,8 +1234,8 @@ void elf_makeshdrs(struct GlobalVars *gv,
       /* find sections which belong to this segment and set their index */
       for (ls=(struct LinkedSection *)gv->lnksec.first;
            ls->n.next!=NULL; ls=(struct LinkedSection *)ls->n.next) {
-        if (ls->copybase>=(unsigned long)p->start &&
-            (ls->copybase+ls->size)<=(unsigned long)p->mem_end &&
+        if (ls->copybase>=p->start &&
+            (ls->copybase+ls->size)<=p->mem_end &&
             (ls->flags & SF_ALLOC) && ls->index==0) {
           uint32_t f = SHF_ALLOC;
           bool bss = ls->type==ST_UDATA || (ls->flags&SF_UNINITIALIZED);
@@ -1248,7 +1248,7 @@ void elf_makeshdrs(struct GlobalVars *gv,
           /* check if section included in other non-LOAD segments as well */
           for (p2=gv->phdrlist; p2; p2=p2->next) {
             if (p2->type!=PT_LOAD && (p2->flags&PHDR_USED) &&
-                p2->start==(lword)ls->copybase)
+                p2->start==ls->copybase)
               p2->offset = elfoffset;
           }
 
@@ -1413,18 +1413,18 @@ void elf_writesegments(struct GlobalVars *gv,FILE *f)
     if (p->type==PT_LOAD && (p->flags&PHDR_USED) &&
         p->start!=ADDR_NONE && p->start_vma!=ADDR_NONE) {
       /* write page-alignment gap */
-      fwritegap(gv,f,p->alignment_gap);
+      fwritegap(gv,f,p->alignment_gap,0);
 
       /* write section contents */
       for (ls=(struct LinkedSection *)gv->lnksec.first;
            ls->n.next!=NULL; ls=(struct LinkedSection *)ls->n.next) {
-        if (ls->copybase>=(unsigned long)p->start &&
-            (ls->copybase+ls->size)<=(unsigned long)p->mem_end &&
+        if (ls->copybase>=p->start &&
+            (ls->copybase+ls->size)<=p->mem_end &&
             (ls->flags & SF_ALLOC)) {
           if (ls->filesize)
             fwritex(f,ls->data,ls->filesize);  /* section's contents */
           if (ls->gapsize)
-            fwritegap(gv,f,ls->gapsize);  /* inter-section alignment gap */
+            fwritegap(gv,f,ls->gapsize,0);  /* inter-section alignment gap */
         }
       }
     }

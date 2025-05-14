@@ -1,8 +1,8 @@
-/* $VER: vlink t_amigahunk.c V0.17a (06.06.22)
+/* $VER: vlink t_amigahunk.c V0.18 (29.08.24)
  *
  * This file is part of vlink, a portable linker for multiple
  * object formats.
- * Copyright (c) 1997-2022  Frank Wille
+ * Copyright (c) 1997-2024  Frank Wille
  */
 
 
@@ -15,6 +15,7 @@
 
 static void init(struct GlobalVars *,int);
 static int options(struct GlobalVars *,int,const char **,int *);
+static void printhelp(void);
 static int ados_identify(struct GlobalVars *,char *,uint8_t *,
                          unsigned long,bool);
 static int ehf_identify(struct GlobalVars *,char *,uint8_t *,
@@ -44,6 +45,7 @@ struct FFFuncs fff_amigahunk = {
   NULL,
   init,
   options,
+  printhelp,
   headersize,
   ados_identify,
   readconv,
@@ -73,6 +75,7 @@ struct FFFuncs fff_ehf = {
   NULL,
   init,
   options,
+  printhelp,
   headersize,
   ehf_identify,
   readconv,
@@ -126,7 +129,7 @@ static const char merged_name[] = "__MERGED";
 static const char nomerge_name[] = "_NOMERGE";
 static unsigned long merged_hash,nomerge_hash;
 
-static bool exthunk,symhunk,resmode,broken_debug;
+static bool exthunk,symhunk,resmode,broken_debug,kick1;
 static struct list *rlist,rrlist;
 static int *rcnt,rrcnt;
 
@@ -154,9 +157,19 @@ static int options(struct GlobalVars *gv,int argc,const char **argv,int *i)
   }
   else if (!strcmp(argv[*i],"-broken-debug"))
     broken_debug = TRUE;
+  else if (!strcmp(argv[*i],"-kick1"))
+    kick1 = TRUE;
   else
     return 0;
   return 1;
+}
+
+
+static void printhelp(void)
+{
+  printf("-broken-debug     ignore free-floating debug hunks\n"
+         "-hunkattr <n>=<v> set memory attributes for hunk name <n> to <v>\n"
+         "-kick1            ensure Kickstart 1.x compatiblity\n");
 }
 
 
@@ -539,17 +552,16 @@ static bool create_debuginfo(struct GlobalVars *gv,struct HunkInfo *hi,
 
         case 0x4c494e45:  /* "LINE" - line/offset table and source name */
           {
-            struct LineDebug *ldb;
-            uint32_t *lptr,*optr;
+            struct SourceLines *sl;
+            srclinetype *lptr;
+            srcoffstype *optr;
 
-            ldb = (struct LineDebug *)addtargetext(s,TGEXT_AMIGAOS,
-                                                   SUBID_LINE,0,
-                                                   sizeof(struct LineDebug));
             len -= testword32(hi) + 3; /* number of longwords for file name */
-            ldb->source_name = gethunkname(hi);
-            ldb->num_entries = len >> 1;
-            lptr = ldb->lines = alloc(ldb->num_entries * sizeof(uint32_t));
-            optr = ldb->offsets = alloc(ldb->num_entries * sizeof(uint32_t));
+            sl = newsourcelines(s,gethunkname(hi));
+            sl->flags |= SLF_NOCASE;
+            allocsrclinetab(sl,len/2);
+            lptr = sl->lines;
+            optr = sl->offsets;
             while (len > 0) {
               *lptr++ = nextword32(hi);
               *optr++ = nextword32(hi) + base;
@@ -817,7 +829,7 @@ static void readconv(struct GlobalVars *gv,struct LinkFile *lf)
             }
           }
 
-          /* Sections of an executable should never be joined, or */
+          /* Sections of an executable should never be merged, or */
           /* dangerous things will happen. */
           if (!secname && hi.exec) {
             static unsigned uniqid[3];
@@ -870,6 +882,7 @@ static void readconv(struct GlobalVars *gv,struct LinkFile *lf)
           switch (w & 0xffff) {
             case HUNK_PPC_CODE:
               s->flags |= SF_EHFPPC;  /* section contains PowerPC code */
+              u->flags |= OUF_EHFPPC; /* object unit targets PowerPC */
             case HUNK_CODE:
               s->type = ST_CODE;
               /* @@@@ amigahunk/ehf code is always writeable ??? */
@@ -958,12 +971,23 @@ static void readconv(struct GlobalVars *gv,struct LinkFile *lf)
       case HUNK_SYMBOL:
         if (s) {
           uint32_t xtype;
+          uint8_t bind;
           char *xname;
 
           nextword32(&hi);
           while (xtype = testword32(&hi)) {
             xname = gethunkname(&hi);
-            switch (xtype >>= 24) {
+            xtype >>= 24;
+
+            if (!(u->flags & OUF_EHFPPC)) {
+              /* check for unofficial BFD-amigaos m68k extension */
+              bind = (xtype & EXTF_LOCAL) ? SYMB_LOCAL : SYMB_GLOBAL;
+              if (xtype & EXTF_WEAK)
+                bind = SYMB_WEAK;
+              xtype &= ~(EXTF_WEAK|EXTF_LOCAL);
+            }
+
+            switch (xtype) {
 
               /* Symbol Definitions */
               case EXT_SYMB:  /* local symbol definition (for debugging) */
@@ -972,11 +996,11 @@ static void readconv(struct GlobalVars *gv,struct LinkFile *lf)
                 break;
               case EXT_DEF:  /* global addr. symbol def. (requires reloc) */
                 create_xdef(gv,s,xname,(int32_t)nextword32(&hi),
-                            SYM_RELOC,SYMB_GLOBAL);
+                            SYM_RELOC,bind);
                 break;
               case EXT_ABS:  /* global def. of absolute symbol */
                 create_xdef(gv,s,xname,(int32_t)nextword32(&hi),
-                            SYM_ABS,SYMB_GLOBAL);
+                            SYM_ABS,bind);
                 break;
               case EXT_RES:  /* unsupported type, invalid since OS2.0 */
                 error(18,lf->pathname,xname,u->objname,EXT_RES);
@@ -1018,13 +1042,13 @@ static void readconv(struct GlobalVars *gv,struct LinkFile *lf)
                 /* ABSCOMMON was never used and only supported */
                 /* by the VERY old ALink linker on AmigaOS. */
                 create_xdef(gv,s,xname,(int32_t)nextword32(&hi),
-                            SYM_COMMON,SYMB_GLOBAL);
+                            SYM_COMMON,bind);
                 create_xrefs(gv,&hi,s,xname,R_ABS,32);
                 break;
                case EXT_RELCOMMON:
                 /* RELCOMMON was introduced in OS3.1. */
                 create_xdef(gv,s,xname,(int32_t)nextword32(&hi),
-                            SYM_COMMON,SYMB_GLOBAL);
+                            SYM_COMMON,bind);
                 create_xrefs(gv,&hi,s,xname,R_PC,32);
                 break;
 
@@ -1032,25 +1056,25 @@ static void readconv(struct GlobalVars *gv,struct LinkFile *lf)
               /* common symbol references, created for vbcc */
               case EXT_DEXT32COMMON:
                 create_xdef(gv,s,xname,(int32_t)nextword32(&hi),
-                            SYM_COMMON,SYMB_GLOBAL);
+                            SYM_COMMON,bind);
                 create_xrefs(gv,&hi,s,xname,R_SD,32);
                 break;
               case EXT_DEXT16COMMON:
                 create_xdef(gv,s,xname,(int32_t)nextword32(&hi),
-                            SYM_COMMON,SYMB_GLOBAL);
+                            SYM_COMMON,bind);
                 create_xrefs(gv,&hi,s,xname,R_SD,16);
                 break;
               case EXT_DEXT8COMMON:
                 create_xdef(gv,s,xname,(int32_t)nextword32(&hi),
-                            SYM_COMMON,SYMB_GLOBAL);
+                            SYM_COMMON,bind);
                 create_xrefs(gv,&hi,s,xname,R_SD,8);
                 break;
 
               default:  /* unsupported HUNK_EXT sub type */
-                if (xtype & 0x80000000)
-                  error(20,lf->pathname,xname,u->objname,xtype>>24);
+                if (xtype & 0x80)
+                  error(20,lf->pathname,xname,u->objname,xtype);
                 else
-                  error(18,lf->pathname,xname,u->objname,xtype>>24);
+                  error(18,lf->pathname,xname,u->objname,xtype);
             }
           }
           nextword32(&hi);
@@ -1332,7 +1356,7 @@ static void get_resident_sdrelocs(struct GlobalVars *gv)
                    and put it into our own list of Resident relocs. */
                 remnode(&r->n);
                 r->offset += sec->offset;
-                r->addend += xdef->value - (lword)xdef->relsect->lnksec->base;
+                r->addend += xdef->value - xdef->relsect->lnksec->base;
                 addtail(&rrlist,&r->n);
                 ++rrcnt;
               }
@@ -1434,6 +1458,12 @@ static struct Symbol *ehf_findsymbol(struct GlobalVars *gv,struct Section *sec,
 {
   struct Symbol *sym,*found;
   uint32_t minmask = ~0;
+  uint16_t ofl;
+
+  if (sec!=NULL && sec->obj!=NULL)
+    ofl = sec->obj->flags & OUF_EHFPPC;
+  else
+    ofl = ~0;
 
   for (sym=gv->symbols[elf_hash(name)%SYMHTABSIZE],found=NULL; sym!=NULL;
        sym=sym->glob_chain) {
@@ -1465,13 +1495,11 @@ static struct Symbol *ehf_findsymbol(struct GlobalVars *gv,struct Section *sec,
       if (found) {
         if (sym->relsect) {
           if (sec) {
-            uint8_t f = sec->flags & SF_EHFPPC;
-          
-            /* we prefer symbols from a section which has the same CPU-flags
-               as the referer's section */
+            /* we prefer symbols from an object which has the same CPU-flags
+               as the referer's object */
             if (sym->type==SYM_RELOC && found->relsect &&
-                (found->relsect->flags & SF_EHFPPC) != f &&
-                (sym->relsect->flags & SF_EHFPPC) == f)
+                (found->relsect->obj->flags & OUF_EHFPPC) != ofl &&
+                (sym->relsect->obj->flags & OUF_EHFPPC) == ofl)
               found = sym;
           }
 
@@ -1815,28 +1843,38 @@ static void linedebug_hunks(struct GlobalVars *gv,FILE *f,
 {
   struct Section *sec = (struct Section *)ls->sections.first;
   struct Section *nextsec;
-  struct LineDebug *ldb;
+  struct SourceLines *sl;
 
   while (nextsec = (struct Section *)sec->n.next) {
-    if (ldb = (struct LineDebug *)sec->special) {
+    if (sl = sec->srclines) {
       do {
-        if (ldb->tgext.id==TGEXT_AMIGAOS && ldb->tgext.sub_id==SUBID_LINE) {
-          uint32_t i,*lptr,*optr;
+        srclinetype *lptr;
+        srcoffstype *optr;
+        char *srcname;
+        unsigned n;
+
+        if (n = sl->entries) {
+          if (sl->path) {
+            srcname = alloc(strlen(sl->path)+strlen(sl->name)+2);
+            sprintf(srcname,"%s%c%s",sl->path,sl->path_sep,sl->name);
+          }
+          else
+            srcname = allocstring(sl->name);
 
           fwrite32be(f,HUNK_DEBUG);
-          fwrite32be(f,3 + strlen32(ldb->source_name) +
-                     (ldb->num_entries<<1));
+          fwrite32be(f,3+strlen32(srcname)+sl->entries*2);
           fwrite32be(f,(uint32_t)sec->offset);
           fwrite32be(f,0x4c494e45);  /* "LINE" */
-          hunk_name_len(gv,f,ldb->source_name);
-          for (i=0,lptr=ldb->lines,optr=ldb->offsets;
-               i<ldb->num_entries; i++) {
+          hunk_name_len(gv,f,srcname);
+          free(srcname);
+
+          for (lptr=sl->lines,optr=sl->offsets; n; n--) {
             fwrite32be(f,*lptr++);
             fwrite32be(f,*optr++);
           }
         }
       }
-      while (ldb = (struct LineDebug *)ldb->tgext.next);
+      while (sl = sl->next);
     }
     sec = nextsec;
   }
@@ -2091,10 +2129,8 @@ static void writeobject(struct GlobalVars *gv,FILE *f,bool ehf)
     unsupp_symbols(ls);  /* print unsupported symbol definitions */
 
     /* line debug hunks */
-    if (gv->strip_symbols < STRIP_DEBUG) {
-      if (checktargetext(ls,TGEXT_AMIGAOS,SUBID_LINE))
-        linedebug_hunks(gv,f,ls);
-    }
+    if (gv->strip_symbols < STRIP_DEBUG)
+      linedebug_hunks(gv,f,ls);
 
     fwrite32be(f,HUNK_END);  /* end of this section */
     ls = nextls;
@@ -2189,7 +2225,7 @@ static void writeexec(struct GlobalVars *gv,FILE *f)
     fix_reloc_addends(gv,ls);
 
     /* Work around a bug in AmigaOS LoadSeg() (up to dos.library V40), which
-       gets confused with completely uninitialized data-bss sections. */
+       doesn't clear completely uninitialized data-bss sections. */
     if (!(ls->flags&SF_UNINITIALIZED) && ls->filesize==0)
       ls->filesize = ls->size>4 ? 4 : ls->size;
 
@@ -2211,19 +2247,29 @@ static void writeexec(struct GlobalVars *gv,FILE *f)
         ierror("writeexec(): Res.Relocs found: %d expected: %d\n",i,rrcnt);
     }
     else if (ls->flags & SF_UNINITIALIZED) {
+      if (kick1 && ls->size > 0x40000)
+        error(153,ls->name);  /* warn about kick 1.x bug with bss > 256k */
       fwrite32be(f,(ls->size+3)>>2);  /* bss - size only */
     }
     else {
-      fwrite32be(f,(ls->filesize+3)>>2);  /* initialized section size */
-      fwritex(f,ls->data,ls->filesize);   /* write section contents */
-      fwrite_align(gv,f,2,ls->filesize);
+      if (kick1) {                          /* no data-bss for kickstart 1.x */
+        fwrite32be(f,(ls->size+3)>>2);      /* complete section size */
+        fwritefullsect(gv,f,ls);
+        fwrite_align(gv,f,2,ls->size);
+      }
+      else {
+        fwrite32be(f,(ls->filesize+3)>>2);  /* initialized section size */
+        fwritex(f,ls->data,ls->filesize);   /* write section contents */
+        fwrite_align(gv,f,2,ls->filesize);
+      }
     }
 
     /* relocation hunks */
-    if (gv->reloctab_format==RTAB_SHORTOFF)
+    if (!kick1 && gv->reloctab_format==RTAB_SHORTOFF)
       reloc_hunk(gv,f,ls,HUNK_DREL32,R_ABS,32);  /* HUNK_RELOC32SHORT */
     reloc_hunk(gv,f,ls,HUNK_ABSRELOC32,R_ABS,32);
-    reloc_hunk(gv,f,ls,HUNK_RELRELOC32,R_PC,32);
+    if (!kick1)
+      reloc_hunk(gv,f,ls,HUNK_RELRELOC32,R_PC,32);
     unsupp_relocs(gv,ls);  /* print unsupported relocations */
 
     /* symbol table */
@@ -2241,10 +2287,8 @@ static void writeexec(struct GlobalVars *gv,FILE *f)
     unsupp_symbols(ls);  /* print unsupported symbol definitions */
 
     /* line debug hunks */
-    if (gv->strip_symbols < STRIP_DEBUG) {
-      if (checktargetext(ls,TGEXT_AMIGAOS,SUBID_LINE))
-        linedebug_hunks(gv,f,ls);
-    }
+    if (gv->strip_symbols < STRIP_DEBUG)
+      linedebug_hunks(gv,f,ls);
 
     fwrite32be(f,HUNK_END);  /* end of this section */
     ls = nextls;

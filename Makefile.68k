@@ -7,7 +7,7 @@ RM = rm -f
 
 CC = vc +aos68k
 CCOUT = -o $(DUMMYVARIABLE)	# produces the string "-o "
-COPTS = -c99 -cpu=68020 -c -O1
+CFLAGS = -c99 -cpu=68020 -c -O1
 CONFIG = -DAMIGAOS
 
 LD = vc +aos68k

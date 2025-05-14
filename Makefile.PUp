@@ -7,7 +7,7 @@ RM = delete force quiet
 
 CC = vc +powerup
 CCOUT = -o $(DUMMYVARIABLE)	# produces the string "-o "
-COPTS = -c99 -c -O1
+CFLAGS = -c99 -c -O1
 CONFIG = -DAMIGAOS
 
 LD = vc +powerup

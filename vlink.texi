@@ -8,12 +8,12 @@
 @setfilename vlink.texi
 @settitle vlink manual
 @setchapternewpage odd
-@set UPDATED June 2022
+@set UPDATED December 2024
 
 @ifinfo
 This is the manual for the portable multi-format linker vlink.
 
-Copyright 1997-2022 Frank Wille
+Copyright 1997-2024 Frank Wille
 @end ifinfo
 
 @titlepage
@@ -30,21 +30,21 @@ Copyright 1997-2022 Frank Wille
 @chapter General
 
 @section Introduction
-@command{vlink} is a portable linker which can be configured to support multiple
-input and output file formats at once. It even allows to link input files
-with a different format in a single run and generate the output file format
-of your choice from it.
+@command{vlink} is a portable linker which can be configured to
+support multiple input and output file formats.
+It even allows linking of input files with different formats within a
+single run and generates an output file format of your choice from it.
 
 The linker supports linking with objects, object archives (static libraries)
 and shared objects or libraries. It can generate an executable file with or
 without additional information for dynamic linking, a shared object, or
-a new object suitable for another linker pass.
+a new object file suitable for another linker pass.
 
 Empty sections and other unused data are deleted to achieve a size-optimized
 output.
 
 @section Legal
-    vlink is copyright 1995-2022 by Frank Wille.
+    vlink is copyright 1995-2024 by Frank Wille.
 
     This archive may be redistributed without modifications and used
     for non-commercial purposes.
@@ -55,6 +55,12 @@ output.
 
     In all other cases you need my written consent.
 
+@section Contact
+Responsible for the current version of vlink and contact address in
+case of bug reports or support requests:
+@itemize @minus
+  @item Frank Wille (frank@@phoenix.owl.de)
+@end itemize
 
 @section Installation
 
@@ -68,14 +74,33 @@ To use @command{vlink} with @command{vbcc}, copy the binary to
 @chapter The Linker
 
 @section Usage
-@command{vlink} links the object and archive files given on the command line
-into a new object file. The output object file is either an executable
-program, a shared object suitable for loading at run-time, or an
-object file that can once again be processed by @command{vlink}.
+@command{vlink} links the object and library archive files given on the
+command line into a new object file. The output object file is either
+an executable program, a shared object suitable for loading at run-time,
+or an object file that can once again be processed by @command{vlink}.
 
-Object files and archives are processed in the order given on the command
-line. Unlike other linkers you usually have to specify each library to link
-against only once, as @command{vlink} is smart enough to figure out all dependencies.
+Object files and library archives are processed in the order given on
+the command line. Unlike other linkers you will usually have to specify
+each library to link against only once, as @command{vlink} is smart enough
+to figure out all dependencies.
+
+Internally, the linker distinguishes three section types:
+@table @code
+@item code
+  Sections containing executable cpu instructions. Mapped as read-only
+  on some systems.
+@item data
+  Sections containing initialized data.
+@item bss
+  Sections containing uninitialized data. Many systems will initialize
+  them to zero on start. Usually only its size is stored in the output.
+@end table
+Additionally, a section has attributes like readable, writeable,
+executable, minimum alignment or target-specific attributes (small-data,
+etc.). Standard behaviour, in absence of a linker script, is to merge
+sections which have the same type and name. Attributes and linker options
+may prevent or force merging of certain sections, depending on the selected
+target format.
 
 The file format of an input object file is determined automatically
 by the linker. The default output file format is compiled in
@@ -83,34 +108,16 @@ by the linker. The default output file format is compiled in
 library search path can also be compiled in and is visible with
 @option{-v} as well.
 
-The number of output file formats included is configurable at compile time.
+The output file formats available can be configured at compile time.
+Refer to @file{config.h}. The default is to include all.
 
 @section Supported File Formats
-The following file formats are supported:
+The following file formats are available:
 
 @table @code
 
-@item a.out
-Currently supported:
-@itemize @minus
-  @item aoutnull (Default with standard relocs and undefined endianness)
-  @item aoutbsd68k (NetBSD/68k)
-  @item aoutbsd68k4k (NetBSD/68k 4K page size)
-  @item aoutsun010 (SunOS 68010 and AmigaOS/Atari 68000/010)
-  @item aoutsun020 (SunOS 68020 and AmigaOS/Atari 68020-68060)
-  @item aoutbsdi386 (NetBSD/i386)
-  @item aoutpc386
-  @item aoutmint (Embeds a.out in TOS format for Atari MiNT executables,
-                  supports extra options like the @code{ataritos} format)
-  @item aoutjaguar (M68k with special, word-swapped RISC relocations)
-@end itemize
-Small data offset: @code{0x8000} (unused).
-Linker symbols:
-@code{__GLOBAL_OFFSET_TABLE_}, @code{__PROCEDURE_LINKAGE_TABLE_},
-@code{__DYNAMIC}.
-
 @item amigahunk
-The AmigaDos hunk format for M68k. Requires AmigaOS 2.04 with
+The AmigaDOS hunk format for M68k. Requires AmigaOS 2.04 for option
 @option{-Rshort}.
 No shared objects. Small data offset @code{0x7ffe}. Linker symbols:
 @itemize @minus
@@ -118,13 +125,13 @@ No shared objects. Small data offset @code{0x7ffe}. Linker symbols:
   @item _DATA_LEN_ (PhxAss)
   @item _BSS_LEN_ (PhxAss)
   @item _LinkerDB (all)
-  @item __BSSBAS (SASC/StormC)
-  @item __BSSLEN (SASC/StormC)
-  @item ___ctors (SASC/StormC)
-  @item ___dtors (SASC/StormC)
-  @item _RESLEN (SASC)
-  @item _RESBASE (SASC)
-  @item _NEWDATAL (SASC)
+  @item __BSSBAS (SAS/C, StormC)
+  @item __BSSLEN (SAS/C, StormC)
+  @item ___ctors (SAS/C, StormC)
+  @item ___dtors (SAS/C, StormC)
+  @item _RESLEN (SAS/C)
+  @item _RESBASE (SAS/C)
+  @item _NEWDATAL (SAS/C)
   @item __DATA_BAS (DICE-C)
   @item __DATA_LEN (DICE-C)
   @item __BSS_LEN (DICE-C)
@@ -154,7 +161,7 @@ memory flags).
 Supports @option{-Rstd} and @option{-Rshort}. The target-specific
 @option{-hunkattr} can be used to overwrite the memory flags of an input
 section.
-This format was called "amigaos" in former @command{vlink} versions.
+This format was called @code{amigaos} in former @command{vlink} versions.
 
 @item amigaehf
 An extension of the AmigaDOS hunk format for the PowerPC,
@@ -167,22 +174,60 @@ Supports @option{-Rstd}, @option{-Rshort} and the target-specific
 @option{-hunkattr}.
 
 @item amsdos
-Absolute raw binary output, similar to rawbin2, but with a header
-for Amstrad/Schneider CPC computers.
+Absolute raw binary multi-file output (like @code{rawbin} option
+@option{-multifile}), but with a header for Amstrad/Schneider CPC computers.
+
+@item a.out
+Currently supported:
+@itemize @minus
+  @item aoutnull (Default with standard relocs and undefined endianness)
+  @item aoutbsd68k (NetBSD/68k)
+  @item aoutbsd68k4k (NetBSD/68k 4K page size)
+  @item aoutsun010 (SunOS 68010 and AmigaOS/Atari 68000/010)
+  @item aoutsun020 (SunOS 68020 and AmigaOS/Atari 68020-68060)
+  @item aoutbsdi386 (NetBSD/i386)
+  @item aoutpc386
+  @item aoutmint (Embeds a.out in TOS format for Atari MiNT executables,
+                  supports extra options like the @code{ataritos} format)
+  @item aoutjaguar (M68k with special, word-swapped RISC relocations)
+@end itemize
+Small data offset: @code{0x8000} (unused).
+Linker symbols:
+@code{__GLOBAL_OFFSET_TABLE_}, @code{__PROCEDURE_LINKAGE_TABLE_},
+@code{__DYNAMIC}.
 
 @item applebin
-Absolute raw binary output, similar to rawbin1, but with a header
+Absolute raw binary output, but with a header
 for Apple DOS 3.3 binary files, suitable for Apple II computers.
 
+@item appleomf
+Apple IIgs relocatable Object Module Format (OMF), as described in the
+File Format chapter of Apple IIGS Programmer's Workshop.
+Executables (load-files) only at the moment. The section's data model
+is recognized either by name (substring in section name: @code{".near"}
+or @code{".huge"} or @code{".zero"} or @code{".dpage"}, defaults to
+far) or by a character in the section's attributes: @code{'z'} for zero or
+direct-page, @code{'N'} for near, @code{'f'} for far and @code{'H'} for
+huge. Different data models will never be merged into one segment. Huge
+segments ignore bank size limits. Only Far segments pay attention to the
+@option{-maxsegsize} option.
+The linker symbol @code{__DBR_init} is provided to define the base address
+of the first near data segment, which can be used to initialize @code{DBR}.
+Target-specific options: @option{-maxsegsize=<size>}, @option{-stack=<size>},
+@option{-version=<n>}.
+
 @item ataricom
-Absolute raw binary output, similar to rawbin1, but with a file header
+Absolute raw binary output, but with a file header
 and section headers for Atari 8-bit computers (Atari 400, 600, 800, etc.).
 
 @item ataritos
-Atari-ST TOS file format. Executables only at the moment. Symbol table
-in extended DRI format. Symbols may be section- or start-based (option
-@option{-tos-textbased}). Additionally is supports the target-specific
-options: @option{-tos-flags}, @option{-tos-fastload},
+Atari-ST TOS executable file format and DRI object file format. Libraries
+are supported in native DRI and standard ar-format. Symbol tables may use
+either the HiSoft or the SozobonX name extension.
+Symbols in TOS executables may be section- or start-based (option
+@option{-tos-textbased} for compatibility with @file{MonST}).
+Additionally supports the target-specific options:
+@option{-tos-flags}, @option{-tos-fastload},
 @option{-tos-fastram}, @option{-tos-fastalloc}, @option{-tos-private},
 @option{-tos-global}, @option{-tos-super}, @option{-tos-readable}.
 The internal linker script defines _LinkerDB for small
@@ -199,19 +244,19 @@ Like bbc, but banked memory will be written to separate files (with a
 suitable linker script) and a loader script is generated.
 
 @item cbmprg
-Absolute raw binary output, similar to rawbin1, but with a header
+Absolute raw binary output, but with a header
 for Commodore 8-bit computers (PET, VIC-20, 64, etc.).
 
 @item cbmreu
-Writes multiple images files for the REU memory expansion. Only the
+Writes multiple image files for the REU memory expansion. Only the
 first one has a Commodore PRG header.
 
 @item cocoml
-Absolute raw binary output, similar to rawbin1, but with segment headers
+Absolute raw binary output, but with segment headers
 and a trailer for Tandy Color Computer machine language files.
 
 @item dragonbin
-Absolute raw binary output, similar to rawbin1, but with a header for
+Absolute raw binary output, but with a header for
 Dragon DOS binary files, suitable for Dragon 32 and 64 computers.
 
 @item elf32amigaos
@@ -281,12 +326,36 @@ function tables will be placed into the sections
 @code{.ctors} and @code{.dtors}.
 Supports @option{-Rstd} and @option{-Radd}.
 
+@item foenixpgx-c02
+PGX is simple, single-segment format for the 65C02/65816-based Foenix computers.
+The header defines the program's load address, which is also the start
+address. This format sets the cpu-type in the header to 65C02.
+
+@item foenixpgx-816
+PGX is simple, single-segment format for the 65C02/65816-based Foenix computers.
+The header defines the program's load address, which is also the start
+address. This format sets the cpu-type in the header to 65816.
+
+@item foenixpgz-24
+PGZ is a multi-segment format for the Foenix computers.
+The format is derived from binary format used by Western Design Center's
+C compiler. Every segment is stored with load address and size, and a
+start address may be defined. This format outputs the @code{'Z'} type
+using 24-bit address and size specifications.
+
+@item foenixpgz-32
+PGZ is a multi-segment format for the Foenix computers.
+The format is derived from binary format used by Western Design Center's
+C compiler. Every segment is stored with load address and size, and a
+start address may be defined. This format outputs the @code{'z'} type
+using 32-bit address and size specifications.
+
 @item ihex
 Intel Hex format. No symbols. Output format only.
 Without a linker script, the raw binary will be relocated to base address 0.
 
 @item jagsrv
-Absolute raw binary output, similar to rawbin1, but with a header to make
+Absolute raw binary output, but with a header to make
 it load and execute via the Atari Jaguar SkunkBoard or the VirtualJaguar
 emulator.
 
@@ -309,9 +378,11 @@ The following target-specific options are supported: @option{-o65-align},
 @option{-o65-stack}.
 
 @item oricmc
-Absolute raw binary output, similar to rawbin1, but with a header for
-machine code files, suitable for ORIC-1, Atmos, Telestrat and Pravetz
-computers.
+Absolute raw binary output, but with a tape header
+for machine code files, suitable for ORIC-1, Atmos, Telestrat and Pravetz
+computers. The name written to the tape file is the output file name.
+Note, that a ".tap" extension will be removed from that name and its
+length will be limited to 15 characters.
 The following target-specific options are supported: @option{-autox}.
 
 @item os9-6809
@@ -327,31 +398,33 @@ No support for symbol tables.
 Supports target-specific options: @option{-os9-mem}, @option{-os9-name},
 @option{-os9-ns}, @option{-os9-rev}.
 
-@item rawbin1
+@item rawbin
 Absolute raw binary file. The sections and base addresses
-have to be specified by a linker script (option @option{-T}). Gaps
-between sections are filled with 0-bytes. Without a linker
-script, the raw binary will be relocated to base address 0.
+have to be specified by a linker script (option @option{-T}).
+Gaps between sections are filled with 0-bytes (you may change that default
+with @option{-fill}), unless option @option{-coalesced} was given.
+With option @option{-multifile} each inter-section gap larger
+than 16 bytes leads to the creation of a new file with the section's name
+appended after a dot. Without a linker script, the raw binary will be
+relocated to base address 0.
 When option @option{-q} (keep relocs) has been specified, the linker
 will not execute absolute address relocations, but append a relocation
 offset table at the end of the file. The width of a word in this
 table matches the target's address size and uses the target's endianness.
-The first word defines the size of the following table. You may reference
-it by using the @code{__end} symbol, which marks the end of the
-bss section. It follows a byte-stream for the reloction offsets.
-A byte between 1 and 255 represents the distance in bytes
-to the next relocation offset (starts at zero).
+The first word defines the size of the following table in bytes.
+You may have to define a label in your code or linker script to access
+the end of your program for referencing this table. The default linker
+script defines the @code{__end} symbol.
+It follows a byte-stream for the reloction offsets.
+A byte between 1 and 255 represents the distance in bytes to the next
+relocation offset (starts at zero).
 A 0-byte indicates that the following word contains a distance greater
 than 255. Your startup code has to add the program's start address to the
 address values in all these locations. Warning: remaining relocations, like
 PC-relative, or other absolute relocations not matching the address size,
 will still be resolved by the linker! Which may be desired, or not.
-
-@item rawbin2
-Similar to rawbin1. The only difference is that a new output file will
-be created, for each section which caused a gap larger than 15 bytes to
-the previous section. The new file name will get the section's name
-appended after a dot.
+Supports target-specific options: @option{-coalesced}, @option{-fill},
+@option{-multifile}.
 
 @item rawseg
 Creates a raw binary file for each segment. Segments can be defined in a
@@ -367,8 +440,8 @@ with the full address size are supported (no halfwords, etc.), which makes
 it nearly useless for certain targets, like the 6502 or RISC CPUs.
 
 @item sinclairql
-Absolute raw binary output, similar to rawbin1, for the 68008-based
-Sinclair QL computer. Prepends a QDOS file header (default, @option{-qhdr}
+Absolute raw binary output for the 68008-based Sinclair QL computer.
+Prepends a QDOS file header (default, @option{-qhdr}
 or an XTcc trailer (@option{-xtcc}). These headers are mostly used
 directly by emulators or for file transfer.
 The following target-specific options are supported: @option{-qhdr},
@@ -396,6 +469,7 @@ The internal linker script defines _LinkerDB for small
 data and supports @command{vbcc}-style
 constructor/destructor tables
 in the data section (@code{__CTOR_LIST__} and @code{__DTOR_LIST__}).
+The following target-specific options are supported: @option{-x-high}.
 
 @end table
 
@@ -409,11 +483,11 @@ The following general options are supported:
 
 @item -Bdynamic
 Specifies that linking against dynamic libraries can take
-place. If a library specifier of the form @option{-lx} appears on
+place. If a library specifier like @option{-lx} appears on
 the command line, @command{vlink} searches for a library of the from
 @file{libx.so.n.m} (see the @option{-l} option) according to the search
-rules in effect. If such a file can not be found a traditional archive
-is looked for. This options can appear anywhere on the command line and is
+rules in effect. If such a file cannot be found a traditional archive
+is looked for. This option may appear anywhere on the command line and is
 complementary to @option{-Bstatic}.
 
 @item -Bstatic
@@ -428,14 +502,14 @@ files rather than a normal executable image.
 
 @item -Bsymbolic
 This option causes all symbolic references in the output to be
-resolved in this link-edit session. The only remaining run-
-time relocation requirements are base-relative relocations,
+resolved in this link-edit session. The only remaining runtime
+relocation requirements are base-relative relocations,
 ie. translation with respect to the load address. Failure to
 resolve any symbolic reference causes an error to be reported.
 
 @item -Bforcearchive
-Force all members of archives to be loaded, whether or not such
-members contribute a definition to any plain object files.
+Force all members of library archives to be loaded, whether or not
+such members contribute a definition to any plain object files.
 Useful for making a shared library from an archive of PIC
 objects without having to unpack the archive.
 
@@ -541,11 +615,13 @@ sections and delete the unreferenced ones.
 @item -gc-empty
 Delete all empty sections from an executable, which are not referenced
 from anywhere in the linked input files.
-Note: Before V1.5d vlink tried to do that always, but it didn't work in
-any case.
+Note: Before V0.15d vlink tried to do that always, but it didn't work in
+all cases.
 
 @item -h
-Prints a short help text.
+Prints a short description for all options. Includes the specific options
+for the target selected with @code{-b}.
+Example: @command{vlink -bo65-02 -h}
 
 @item -interp interpreter-path
 Defines the name of the interpreter, which is usually the
@@ -561,8 +637,8 @@ Has no meaning when using a linker script!
 @item -L library-search-path
 Add path to the list of directories to search for libraries
 specified with the @option{-l} option. When a default search path
-was compiled in (see @option{-v}), then it is searched last, before
-finally looking into the local directory.
+was compiled in (see @option{-v}), then it is searched last, just
+before looking into the local directory.
 
 @item -l library-specifier
 This option specifies a library to be considered for inclusion
@@ -571,15 +647,20 @@ library of the form @file{lib<spec>.so.m.n} (where @code{m} is the
 major, and @code{n} is the minor version number, respectively) is searched
 for first. The library with the highest version found in the
 search path is selected. If no shared library is found or
-the @option{-Bstatic} option is in effect, an archive of the form
-@file{lib<spec>.a} is looked for in the library search path.
-For @code{amigaos}/@code{amigaehf} file formats, the libraries are
+the @option{-Bstatic} option is in effect, a library archive of
+the form @file{lib<spec>.a} is looked for in the library search path.
+For some formats, like @code{amigaos}/@code{amigaehf}, the libraries are
 called @file{<spec>.lib}.
 
+@item -lineoffsets filename
+Output source line offsets into a file in ASCII format. The output format
+first defines indexes for source file names, followed by all sections
+with a list of triples in the format: @code{src-index:line:offset}.
+
 @item -M[file name]
-Produce output about the mapping of sections of the input
+Produce output about the mapping of sections from the input
 files and the values assigned to symbols in the output file.
-When the optional @code{file name} is missing output goes to stdout.
+When the optional @code{file name} is missing the output goes to stdout.
 
 @item -m
 Enable special treatment of feature-mask suffixes in symbol names.
@@ -596,22 +677,30 @@ Set a minimum alignment (number of bits which have to be zero) for all
 imported sections. The specified @code{alignment} value will only take
 effect when higher than the section's current alignment. It defaults to 0.
 
+@item -mall
+Merge all sections into a single output section.
+(Only when linking without a linker-script!)
+
+@item -mattr
+Merge all sections with the same attributes (readable, writeable,
+executable), memory model (small, large, etc.) and target-specific
+memory attributes.
+(Only when linking without a linker-script!)
+
 @item -mrel
 Automatically merge sections, when there are PC-relative references
 between them.
+(Only when linking without a linker-script!)
 
 @item -mtype
 Merge all sections of the same type (code, data, bss), even when
 their names or attributes differ.
-
-@item -mall
-Merge all sections into a single output section.
+(Only when linking without a linker-script!)
 
 @item -multibase
 The default behaviour of @command{vlink} is to merge all sections
-which are accessed base-relative. This guarantees a single
-small data section, which can be accessed through a base
-register.
+which are referenced by base-relative addressing modes. This guarantees
+a single small data section, which can be accessed through a base register.
 If this is not desired - maybe you have several base registers and
 small data sections - you can disable this behaviour by specifying
 @option{-multibase}.
@@ -635,10 +724,20 @@ Do not display warning number @code{n}. May occur multiple times.
 @item -o filename
 Specifies the name of the output file. Defaults to @file{a.out}.
 
+@item -obe
+Use big-endian order on the octets (8-bit host bytes) in a target-byte,
+when writing output to the host's file system (default).
+Only valid for target architectures with more than 8 bits per byte.
+
+@item -ole
+Use little-endian order on the octets (8-bit host bytes) in a target-byte,
+when writing output to the host's file system.
+Only valid for target architectures with more than 8 bits per byte.
+
 @item -osec
 Output each section as an individual file. The file name given with
 @option{-o} will be ignored. Only available for some target formats:
-rawbin1, rawbin2, amsdos, cbmprg.
+rawbin, amsdos, cbmprg.
 
 @item -osec=basename
 Works like @option{-osec}, but each output file name will be preceded
@@ -702,6 +801,22 @@ Sets the "real name" of a shared object or library. For ELF
 this will create the @code{SONAME} tag in the @code{.dynamic}
 section.
 
+@item -symctrl=flags
+Control/filter the symbol file output by one or more flags added together.
+Currently the only valid flag is @code{4}, to exclude local symbols.
+
+@item -symfile filename
+Output all labels and absolute symbols, together with their value, into
+the given file. The output format of such a symbol/value line can be
+defined with @option{-symfmt}.
+
+@item -symfmt formatstring
+Uses @code{formatstring} as a @code{printf}-style format string to output
+a symbol/value pair into the file given by @option{-symfile}. Any integer
+format character (@code{diouXx}) can be used for the value. The @code{s}
+character designates the position of the symbol's name. The default
+output format is @code{"0x%08llx:%s"}.
+
 @item -T script
 Specifies a linker script, which defines the mapping of input
 sections and their absolute locations in memory.
@@ -737,6 +852,7 @@ and implemented target file formats.
 
 @item -vicelabels filename
 Generates a label address mapping file for the VICE debugger.
+This is a shortcut for a symbol file with @code{-symfmt "al C:%04lx .%s"}.
 
 @item -w
 Suppress all warning messages.
@@ -775,6 +891,27 @@ Overwrite the memory attributes of all input sections named @code{secname}
 with @code{value}. For example allocate the @code{DATA} section in
 Chip-RAM: @code{-hunkattr DATA=2}. Extended memory attributes are supported.
 
+@item -kick1
+Make sure the executable file is compatible with Kickstart 1.x.
+It avoids 16-bit reloc offsets (ignores @option{-Rshort}),
+data-bss sections (same as @option{-Z}), 32-bit PC-relative
+relocs and warns about known bugs in the 1.x hunk-loader.
+
+@end table
+
+@subsection Target specific options @code{appleomf}
+@table @option
+
+@item -maxsegsize=size
+Define the maximum size in bytes for segments with multiple sections. A
+section which doesn't fit into the current segment is moved into the next.
+
+@item -stack=size
+Stack size in bytes to add to the DirectPage/Stack segment.
+
+@item -version=n
+Generate a version 1 (default) or version 2 OMF file.
+
 @end table
 
 @subsection Target specific options @code{aoutmint}, @code{ataritos}
@@ -798,6 +935,15 @@ Sets the flags in the TOS header to mark memory space as private.
 @item -tos-global
 Sets the flags in the TOS header to mark memory space as global (read/write
 by any process).
+
+@item -tos-sozobonx
+Uses the Sozobon extension to write unlimited symbol names. Disables
+the Hisoft symbol name extension.
+
+@item -tos-stddri
+Write a standard DRI symbol table, which limits symbol names to 8 characters.
+This is the default for object files. For TOS executables the HiSoft symbol
+name extension is enabled, which allows up to 22 characters.
 
 @item -tos-super
 Sets the flags in the TOS header to mark memory space as read-writeable by
@@ -902,6 +1048,46 @@ dataspace size calculation. Defaults to 4096.
 
 @end table
 
+@subsection Target specific options @code{rawbin}
+@table @option
+
+@item -coalesced
+Memory gaps between sections are ignored. The following output section is
+written directly attached to the previous one.
+
+@item -multifile
+Memory gaps of more than 15 bytes between two output section create a new
+file. The file name has the format @code{outname.sectioname}.
+This option selects the former @code{rawbin2} target format.
+
+@item -fill=val
+Defines the fill-value (target-byte) for filling inter-section gaps.
+Defaults to zero.
+
+@end table
+
+@subsection Target specific options @code{vobj-be}, @code{vobj-le}
+@table @option
+
+@item -vobj2
+Use vobj format version 2 which generally reduces file size.
+
+@item -vobjcpu name
+When writing a relocatable object file in VOBJ format (@option{-r} option),
+without reading any VOBJ input file, you may have to define the
+target CPU. Especially when target-specific relocations are used.
+Otherwise the default CPU is "generic". Example: @code{-vobjcpu PowerPC}
+
+@end table
+
+@subsection Target specific options @code{xfile}
+@table @option
+
+@item -x-high
+Sets the high-address flag in the header.
+
+@end table
+
 
 @node Linker Scripts
 @chapter Linker Scripts
@@ -914,12 +1100,12 @@ The syntax is:
 
 @example
 MEMORY @{
-  memblockname (attr) : ORIGIN = org, LENGTH = len
+  memblockname (attr) : ORIGIN = org, LENGTH = len [,ID = id]
   ...
 @}
 @end example
 
-Defines one of more memory regions with start address @code{org} and a
+Defines one or more memory regions with start address @code{org} and a
 length of @code{len} bytes. The attributes in @code{(attr)} are optional
 and will be ignored by vlink, when specified (just for compatibility, at
 the moment). The keywords @code{ORIGIN} and @code{LENGTH} may be
@@ -927,6 +1113,8 @@ abbreviated down to a single character (@code{o=} and @code{l=}).
 Once a memory region is defined as @code{memblockname} the output of
 sections can be redirected into it by appending @code{>memblockname} at
 the end of a section definition.
+The memory ID (or bank ID) is optional and can be referenced by a
+special relocation type which is only supported in @file{VOBJ} format.
 
 @section Output Sections
 @example
@@ -934,7 +1122,7 @@ SECTIONS @{
   ...
 @}
 @end example
-This is the only mandatory block in each linker script and is used to
+This is the only mandatory block in a linker script and is used to
 define the mapping of input sections to output sections, as well as
 their location in memory.
 
@@ -954,7 +1142,7 @@ An optional symbol assignment looks like
 @example
 symbol =? expression;
 @end example
-where the only difference to a normal symbol assignment is, that
+where the difference to a normal symbol assignment is that
 @code{symbol} will only be defined with the given expression when it was
 not already defined before (in a line above, or on the command line
 with option @option{-D}).
@@ -964,7 +1152,7 @@ All valid linker-script commands are described here: @xref{Commands}.
 An output section definition has many optional attributes and looks like
 this in its complete form:
 @example
-secname vma (type) : AT(lma) @{
+secname vma (BANKSIZE=sz) (NOLOAD) : AT(lma) @{
   file/section-patterns and commands
   ...
 @} >region AT>lma-region :phdr =fill
@@ -978,10 +1166,15 @@ Everything else is optional.
 @item vma
   When given, defines the section's start address (VMA) as @code{vma}
   and also redefines the location counter.
-@item (type)
-  Optional. The only valid @code{type} in vlink is @code{NOLOAD}, which
-  avoids writing the section's contents into the output file. Usually
-  this makes sense for uninitialized sections, like BSS.
+@item (BANKSIZE=sz[,off])
+  Optional. Sets the output section's bank size to @code{sz} bytes.
+  Whenever an input section crosses bank-boundaries, align it to the
+  beginning of the next bank. The optional @code{off} argument can be
+  used to always start a bank @code{off} bytes behind the bank's usual
+  starting address.
+@item (NOLOAD)
+  Optional. Avoids writing the section's contents into the output file.
+  Usually this makes sense for uninitialized sections, like BSS.
 @item AT(lma)
   Optionally sets the load-address (LMA) of the section to @code{lma}.
   Useful for initialized data loaded into ROM, which is copied to its
@@ -1006,8 +1199,8 @@ Everything else is optional.
 Between the curly-braces there may be linker-script commands
 (@xref{Commands}), symbol assignments and one or multiple input section
 specifications. An input section specification consists of a 
-single file-pattern and one or multiple section-patterns, which looks like:
-@code{fpat(spat1 spat2...)}.
+single file-pattern (fpat) and one or multiple section-patterns, which looks
+like: @code{fpat(spat1 spat2...)}.
 
 To match multiple files or sections the usual wildcards may be used for
 file- and section-patterns. The wildcard capabilities depend on the host
@@ -1015,19 +1208,42 @@ operating system vlink is running on, so do not expect that anything more
 than '@code{*}' (match any string) and '@code{?}' (match any character)
 will work.
 
-The matching input files and their matching input sections will be included
-into the output section at this point.
+All matching input files and their matching input sections will be merged
+into the output section at this point, provided the output section has
+enough space (as defined by @code{MEMORY} region constraints).
 
 The following functions are valid when specifying input section patterns:
 @table @code
 @item KEEP(fpat(spat...))
   Always keep these input sections in the output. Never delete them by any
   form of garbage collection (e.g. @option{-gc-all} or @option{-gc-empty}).
-@item SORT(fpat)(spat...)
-  Sort the file names to include sections from.
+@item fpat(EXCLUDE_FILE(xpat...) spat...)
+  Files matching to any of @code{xpat} will be excluded from the matching
+  file pattern (@code{fpat}).
+@item fpat(EXCLUDE_SECTION(xpat...) spat...)
+  Section names matching to any of @code{xpat} will be excluded from the
+  matching section patterns (@code{spat}).
 @item fpat(SORT(spat...))
-  Include matching input sections sorted.
+  Alias for @code{SORT_BY_NAME}.
+@item fpat(SORT_BY_ALIGNMENT(spat...))
+  Merge matching input sections sorted by alignment (descending).
+@item fpat(SORT_BY_NAME(spat...))
+  Merge matching input sections sorted by name (ascending).
+@item fpat(SORT_BY_SIZE(spat...))
+  Merge matching input sections sorted by size (descending).
+@item fpat(REVERSE(SORT_BY_mode(spat...)))
+  Reverse the following sorting order. Defaults to sort by name when the
+  proper @code{SORT} command is missing.
 @end table
+
+Multiple @code{EXCLUDE} functions (of different kind) may be specified at once,
+but they need to be the first functions within the parentheses following
+the @code{fpat}.
+
+It is also allowed to specify up to two sorting levels in a single pattern.
+For example @code{fpat(SORT_BY_NAME(SORT_BY_ALIGNMENT(spat...)))} would sort
+all sections by their name first, then sections with the same name by
+alignment.
 
 @section Program Headers
 @example
@@ -1076,7 +1292,7 @@ The following commands are currently supported in vlink linker scripts:
   optional @code{message}, when zero.
 
 @item BYTE(expression)
-  Insert a byte at the current section address and assign the value of
+  Insert a target byte at the current section address and assign the value of
   @code{expression} to it.
 
 @item CONSTRUCTORS
@@ -1113,8 +1329,8 @@ The following commands are currently supported in vlink linker scripts:
   be appended.
 
 @item LONG(expression)
-  Insert a 32-bit word the current section address and assign the value of
-  @code{expression}, using the target's endianness, to it.
+  Insert four target-bytes at the current section address and assign the
+  value of @code{expression}, using the target's endianness, to it.
 
 @item OUTPUT_ARCH()
 @itemx OUTPUT_FORMAT()
@@ -1126,7 +1342,7 @@ The following commands are currently supported in vlink linker scripts:
   is referenced from anywhere in the input files.
 
 @item QUAD(expression)
-  Insert a 64-bit word the current section address and assign the value of
+  Insert 8 target-bytes at the current section address and assign the value of
   @code{expression}, using the target's endianness, to it.
 
 @item RESERVE(space)
@@ -1139,11 +1355,11 @@ The following commands are currently supported in vlink linker scripts:
   effect as @option{-L}.
 
 @item SHORT(expression)
-  Insert a 16-bit word the current section address and assign the value of
-  @code{expression}, using the target's endianness, to it.
+  Insert two target-bytes at the current section address and assign the
+  value of @code{expression}, using the target's endianness, to it.
 
 @item SQUAD(expression)
-  Insert a 64-bit word the current section address and assign the value of
+  Insert 8 target-bytes the current section address and assign the value of
   @code{expression}, using the target's endianness, to it.
 
 @item VBCC_CONSTRUCTORS
@@ -1208,7 +1424,6 @@ The following functions are currently supported in vlink linker scripts:
   @item Default linker scripts are mostly missing, so you need to provide
     your own script by using the @option{-T} option.
   @item @code{PHDR} support for ELF is not perfect.
-  @item The feature mask option (@option{-m}) doesn't work for EHF yet.
 @end itemize
 
 @section Credits
@@ -1225,6 +1440,7 @@ alphabetical order, probably not complete):
   @item Romain Giot
   @item Stefan Haubenthal
   @item Mikael Kalms
+  @item Chester Kollschen
   @item Miro Kropacek
   @item Jean-Paul Mari
   @item Gunther Nikl
@@ -1297,7 +1513,7 @@ alphabetical order, probably not complete):
 @item %s: ELF section header type %d in %s is not needed in shared objects
 @item %s: Endianness differs from previous objects
 @item Target file format doesn't support relocatable objects
-@item Predefined limits of destination memory region %s for section %s were exceeded (0x%llx)
+@item Predefined limits of destination memory region %s for output section %s were exceeded (0x%llx)
 @item Section %s(%s) was not recognized by target linker script
 @item %s line %d: Unknown keyword <%s> ignored
 @item %s line %d: '%c' expected
@@ -1370,6 +1586,8 @@ alphabetical order, probably not complete):
 @item Unsupported absolute relocation (offs=%lld pos=%d siz=%d msk=0x%llx) in resident data section
 @item %s (%s+0x%x): Absolute reference to resident data section (%s)
 @item %s line %d: Undefined memory region: <%s>
+@item Executable section <%s> in data segment not allowed
+@item Not enough space for the module header (%u of %u)
 @item Target %s: multiple %s sections not allowed: <%s> and <%s>
 @item %s: symbol index %u is out of range
 @item %s: %s is chained
@@ -1385,6 +1603,22 @@ alphabetical order, probably not complete):
 @item %s: Hunk format corrupted: DEBUG hunk used like a section with name "%s" in unit "%s". Trying to ignore
 @item %s: Duplicate con/destructor name %s definition ignored
 @item Warnings treated as errors
+@item %s: Kickstart 1.x cannot initialize bss sections >256k to zero
+@item No CPU defined for VOBJ output. Consider using -vobjcpu
+@item Indirect symbol %s -> %s not allowed in %s
+@item Alternating CPU definitions from VOBJ input - keeping the first one (%s)
+@item Bad symbol file format
+@item No space to fit section %s(%s) with end address %#llx into memory region
+@item %s (%s+%#lx): Reference from overlayed section %s to %s (symbol %s) is not allowed (NOCROSSREFS)
+@item Target %s: Too many symbols for selected output format
+@item Invalid version. Assuming V%d.%d
+@item Target %s: Output section %s exceeds maximum size %lu
+@item %s: No valid bank size defined
+@item %s (%s): Section exceeds maximum bank size of %lu
+@item %s (%s+%#lx): output section %s (referenced symbol: %s) has no memory id defined, assuming zero
+@item %s (%s+%#lx): reference to memory id of relocatable symbol %s=%#llx%c%#llx (value to write: %s%#llx) doesn't fit into %d bits
+@item %s line %d: Maximum of %d sorting levels exceeded
+@item %s line %d: Multiple EXCLUDE_%s commands in one pattern
 
 @end enumerate
 

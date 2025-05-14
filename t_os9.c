@@ -1,8 +1,8 @@
-/* $VER: vlink t_os9.c V0.16h (16.01.21)
+/* $VER: vlink t_os9.c V0.18 (23.12.24)
  *
  * This file is part of vlink, a portable linker for multiple
  * object formats.
- * Copyright (c) 1997-2021  Frank Wille
+ * Copyright (c) 1997-2021,2024  Frank Wille
  */
 
 #include "config.h"
@@ -14,6 +14,7 @@
 
 static void init(struct GlobalVars *,int);
 static int options(struct GlobalVars *,int,const char **,int *);
+static void printhelp(void);
 static int identify(struct GlobalVars *,char *,uint8_t *,unsigned long,bool);
 static void readconv(struct GlobalVars *,struct LinkFile *);
 static int targetlink(struct GlobalVars *,struct LinkedSection *,
@@ -30,6 +31,7 @@ struct FFFuncs fff_os9_6809 = {
   NULL,
   init,
   options,
+  printhelp,
   hdrsize_6809,
   identify,
   readconv,
@@ -128,6 +130,15 @@ static int options(struct GlobalVars *gv,int argc,const char *argv[],int *i)
   else return 0;
 
   return 1;
+}
+
+
+static void printhelp(void)
+{
+  printf("-os9-mem=<val>[K] set size of stack/parameter area (default 1024)\n"
+         "-os9-name=<name>  overwrite the module name in the header\n"
+         "-os9-ns           declare module as non-shareable and non-reentrant\n"
+         "-os9-rev=<val>    set revision in the module header (0-15, def. 0)\n");
 }
 
 
@@ -313,7 +324,7 @@ static void writeexec_6809(struct GlobalVars *gv,FILE *f)
   lword rmask=makemask(16);
   size_t initdata_size,bss_size,stk_size,file_size;
   uint16_t entryoffs;
-  unsigned long lma;
+  lword lma;
   uint8_t *buf,crc[3];
   mh6809 hdr;
 
@@ -343,7 +354,7 @@ static void writeexec_6809(struct GlobalVars *gv,FILE *f)
     if (lma==0 && ls->copybase<sizeof(mh6809))
       error(137,(unsigned)ls->copybase,sizeof(6809));  /* not enough space */
     if (ls->copybase > lma)
-      fwritegap(gv,f,ls->copybase-lma);
+      fwritegap(gv,f,ls->copybase-lma,0);
     lma = ls->copybase + ls->size;
 
     checkPIC(ls);
@@ -365,7 +376,7 @@ static void writeexec_6809(struct GlobalVars *gv,FILE *f)
         error(136,ls->name);  /* executable section in data segment */
 
       if (ls->copybase > lma)
-        fwritegap(gv,f,ls->copybase-lma);
+        fwritegap(gv,f,ls->copybase-lma,0);
       lma = ls->copybase + ls->size;
 
       /* move data-text and data-data relocations into their own list */
@@ -382,7 +393,7 @@ static void writeexec_6809(struct GlobalVars *gv,FILE *f)
           remnode(&rel->n);
           writesection(gv,ls->data,rel->offset,rel,
                        rel->relocsect.lnk->base+rel->addend);
-          rel->offset += (lword)ls->base; /* offset relative to whole segment */
+          rel->offset += ls->base; /* offset relative to whole segment */
           if (rel->relocsect.lnk->type==ST_CODE) {
             addtail(&dtrefs,&rel->n);
             dtrefcnt++;

@@ -105,7 +105,7 @@ static bool portable_pattern_match(const char *mask, const char *name)
     else {
       q = 0;
     }
-    if ((tolower(*m) != tolower(*n)) && ((*m != '?') || q)) {
+    if ((*m != *n) && ((*m != '?') || q)) {
       if (!wild)
         return(TRUE);
       m = ma;

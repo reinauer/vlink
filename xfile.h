@@ -1,8 +1,8 @@
-/* $VER: vlink xfile.h V0.16c (08.03.19)
+/* $VER: vlink xfile.h V0.18 (20.10.24)
  *
  * This file is part of vlink, a portable linker for multiple
  * object formats.
- * Copyright (c) 1997-2019  Frank Wille
+ * Copyright (c) 1997-2019,2024  Frank Wille
  */
 
 
@@ -10,9 +10,10 @@
 typedef struct
 {
   uint8_t x_id[2];        /* 'H','U' - xfile identification */
-  uint8_t x_rsrvd1[2];    /* unused - always zero */
-  uint8_t x_baseaddr[4];  /* linker's base address */
-  uint8_t x_execaddr[4];  /* start address on base address */
+  uint8_t x_rsrvd1[1];    /* unused - always zero */
+  uint8_t x_loadmode;     /* normal, minimal memory, high address */
+  uint8_t x_baseaddr[4];  /* linker's base address, usually 0 */
+  uint8_t x_execaddr[4];  /* execution offset on load address */
   uint8_t x_textsz[4];    /* .text size in bytes */
   uint8_t x_datasz[4];    /* .data size in bytes */
   uint8_t x_heapsz[4];    /* .bss and .stack size in bytes */
@@ -23,6 +24,11 @@ typedef struct
   uint8_t x_scdstrsz[4];  /* SCD strings size */
   uint8_t x_rsrvd2[20];   /* unused - always zero */
 } XFile;
+
+/* x_loadmode */
+#define XLMD_NORMAL     0
+#define XLMD_MINMEM     1
+#define XLMD_HIGHADDR   2
 
 
 /* Xfile symbol table */
